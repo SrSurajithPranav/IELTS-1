@@ -96,8 +96,8 @@ export default function ProgressPage() {
             Total submissions: <strong>{subs.length}</strong> ·
             Streak: <strong style={{ color: 'var(--gold)' }}>{user?.streak || 0} 🔥</strong>
           </div>
-          {user?.score > 0 && (
-            <Badge label={`Est. Band ${user.score}`} color="success" style={{ marginTop: 8 }} />
+           {user?.score > 0 && (
+             <Badge label={`Reported score ${user.score}`} color="success" style={{ marginTop: 8 }} />
           )}
         </div>
       </Card>

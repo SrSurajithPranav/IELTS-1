@@ -552,7 +552,7 @@ const QuizRunner = ({ quiz, onDone }) => {
       <div style={{ ...card, marginTop: 12, background: "rgba(91,141,239,.08)", border: "1px solid rgba(91,141,239,.24)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ fontWeight: 700 }}>AI Quiz Coach</div>
-          {aiCoach && <Badge label={`Band ${aiCoach.band_estimate}`} c="success" />}
+           {aiCoach && <Badge label="No official band score" c="warning" />}
         </div>
         {aiLoading && <div style={{ fontSize: 12, color: "var(--muted2,#7b849c)" }}>Building your improvement plan…</div>}
         {aiError && <div style={{ fontSize: 12, color: "var(--danger,#f87171)" }}>{aiError}</div>}

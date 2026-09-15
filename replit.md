@@ -1,36 +1,47 @@
-# [Project name]
+# IELTS Training Platform
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An IELTS preparation platform with student, teacher, and admin workflows for plans, tasks, submissions, feedback, and practice diagnostics.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- The main app lives in `IELTS/`.
+- The `IELTS Training Platform` workflow starts Flask on port 5000 and Vite on port 5173.
+- `cd IELTS && npm run dev` — run the frontend only.
+- `cd IELTS && npm run build` — build the frontend.
+- `cd IELTS && python app.py` — run the Flask API.
+- `cd IELTS && python -m unittest discover -s tests -p 'test*.py' -v` — run backend tests.
+- `cd IELTS && python -m py_compile app.py config.py migrate_db.py routes/*.py utils/*.py models/*.py` — compile-check backend Python files.
+- Required production env: `DATABASE_URL`, `JWT_SECRET_KEY`, and configured CORS origins.
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Frontend: React 18, Vite, React Router, Recharts, Socket.IO client
+- API: Flask, Flask-SQLAlchemy, Flask-JWT-Extended, Flask-SocketIO
+- Database: PostgreSQL via SQLAlchemy and psycopg2
+- Deployment targets: Supabase PostgreSQL, Render Gunicorn backend, Vercel frontend
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `IELTS/app.py` — Flask application factory and startup initialization
+- `IELTS/config.py` — environment-backed configuration and production validation
+- `IELTS/routes/` — API route blueprints
+- `IELTS/models/` — SQLAlchemy models
+- `IELTS/src/` — React frontend
+- `IELTS/FEATURE_STATUS.md` — current feature completeness and known limitations
+- `IELTS/REPOSITORY_AUDIT.md` — architecture and persistence audit
+- `IELTS/requirements.txt` — backend dependency source of truth
+- `IELTS/package.json` — frontend dependency source of truth
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Existing Flask/React architecture is preserved; deployment work is incremental rather than a rewrite.
+- PostgreSQL is required for production persistence; local disk is not a production storage fallback.
+- IELTS band scores are only shown when supplied by teacher-reviewed data. Transcript and language checks are practice diagnostics, not official scoring.
+- Production audio uploads require configured Cloudinary storage.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Students can authenticate, follow study plans, complete reading/listening/writing/speaking tasks, submit work, and review feedback. Teachers and admins can manage students, plans, tasks, and reviews.
 
 ## User preferences
 
@@ -38,7 +49,10 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Run `IELTS/migrate_db.py` before Gunicorn in production so existing PostgreSQL databases receive required columns.
+- Do not enable demo seed data in production.
+- Python 3.13 requires `psycopg2-binary` 2.9.10 or newer.
+- The current heuristic practice checks must not be presented as official IELTS band evaluation.
 
 ## Pointers
 

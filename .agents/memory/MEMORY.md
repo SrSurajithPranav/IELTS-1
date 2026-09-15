@@ -1,0 +1,1 @@
+- [IELTS runtime compatibility](ielts-runtime-compatibility.md) — Python 3.13 needs a current psycopg2-binary release for PostgreSQL installs.
