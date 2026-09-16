@@ -22,11 +22,12 @@ NODE_ENV = "production"
 
 [services.production.run]
 # we don't run through pnpm to make startup faster in production
-args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
+args = ["sh", "-c", "exec python -m gunicorn --chdir backend wsgi:app --bind 0.0.0.0:${PORT:-8080} --workers 2 --threads 2 --timeout 120"]
 
 [services.production.run.env]
 PORT = "8080"
 NODE_ENV = "production"
+FLASK_ENV = "production"
 
 [services.production.health.startup]
-path = "/api/healthz"
+path = "/api/health"

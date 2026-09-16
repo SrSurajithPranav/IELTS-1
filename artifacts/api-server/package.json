@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
-    "build": "node ./build.mjs",
-    "start": "node --enable-source-maps ./dist/index.mjs",
+    "dev": "FLASK_ENV=development python -m gunicorn --chdir ../../backend wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120",
+    "build": "mkdir -p dist && printf 'IELTS Flask API uses backend/wsgi.py\\n' > dist/README.txt",
+    "start": "FLASK_ENV=production python -m gunicorn --chdir backend wsgi:app --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

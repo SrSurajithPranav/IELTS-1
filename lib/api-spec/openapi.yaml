@@ -3,20 +3,23 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: IELTS learning, practice, progress, and review API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
+  - name: auth
+  - name: dashboard
+  - name: practice
+  - name: submissions
+  - name: plans
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +27,267 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a student account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: Authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Sign in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: Get the current user profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get current learner dashboard summary
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Learner summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+  /tasks/today:
+    get:
+      operationId: getTodayTasks
+      tags: [practice]
+      summary: List today's practice tasks
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Practice tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+  /submissions/student/{studentId}:
+    get:
+      operationId: getStudentSubmissions
+      tags: [submissions]
+      summary: List submissions for a student
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Submission history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Submission"
+  /ai/writing/analyze:
+    post:
+      operationId: analyzeWriting
+      tags: [practice]
+      summary: Run transparent language checks on a writing response
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TextInput"
+      responses:
+        "200":
+          description: Language indicators without an official IELTS band estimate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LanguageAnalysis"
+  /ai/speaking/analyze:
+    post:
+      operationId: analyzeSpeaking
+      tags: [practice]
+      summary: Analyze a speaking transcript
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TextInput"
+      responses:
+        "200":
+          description: Transcript indicators without pronunciation or official band scoring
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LanguageAnalysis"
+  /plans:
+    get:
+      operationId: listPlans
+      tags: [plans]
+      summary: List available study plans
+      responses:
+        "200":
+          description: Study plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Plan"
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     HealthStatus:
       type: object
       properties:
         status:
           type: string
-      required:
-        - status
-
+        database:
+          type: [string, "null"]
+      required: [status]
+    RegisterInput:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string, minLength: 2 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1 }
+    User:
+      type: object
+      required: [id, name, email, role]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [student, teacher, admin] }
+        score: { type: number }
+        streak: { type: integer }
+        weak_areas:
+          type: array
+          items: { type: string }
+        listening_band: { type: [number, "null"] }
+        reading_band: { type: [number, "null"] }
+        writing_band: { type: [number, "null"] }
+        speaking_band: { type: [number, "null"] }
+    AuthSession:
+      type: object
+      required: [access_token, refresh_token, user]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        user: { $ref: "#/components/schemas/User" }
+    Task:
+      type: object
+      required: [id, title, type, status]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        description: { type: [string, "null"] }
+        type: { type: string }
+        status: { type: string }
+        due_date: { type: [string, "null"], format: date }
+    Submission:
+      type: object
+      required: [id, status, submitted_at]
+      properties:
+        id: { type: integer }
+        task_id: { type: [integer, "null"] }
+        student_id: { type: integer }
+        content: { type: [string, "null"] }
+        status: { type: string }
+        band_score: { type: [number, "null"] }
+        submitted_at: { type: string, format: date-time }
+        feedback_text: { type: [string, "null"] }
+    DashboardSummary:
+      type: object
+      required: [streak, completion_rate, skill_progress]
+      properties:
+        streak: { type: integer }
+        completion_rate: { type: number }
+        skill_progress:
+          type: object
+          additionalProperties: { type: number }
+    TextInput:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1 }
+    LanguageAnalysis:
+      type: object
+      required: [transcript, analysis, evaluation_available]
+      properties:
+        transcript: { type: string }
+        analysis:
+          type: object
+          additionalProperties: true
+        band_estimate: { type: [number, "null"] }
+        evaluation_available: { type: boolean }
+        pronunciation_available: { type: [boolean, "null"] }
+        notice: { type: [string, "null"] }
+    Plan:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        duration_days: { type: [integer, "null"] }
