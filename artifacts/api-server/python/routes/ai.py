@@ -1,0 +1,875 @@
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from models.user import User
+from models.submission import Submission
+from models.task import Task
+from utils.ai_helpers import speech_to_text, check_grammar
+from collections import Counter
+from datetime import datetime, timedelta
+import re
+
+ai_bp = Blueprint('ai', __name__, url_prefix='/api/ai')
+
+
+SKILLS = ['reading', 'listening', 'writing', 'speaking', 'grammar']
+
+
+def _resolve_target_student(requester, student_id):
+    if student_id is None:
+        return requester, None
+    if requester.role != 'admin':
+        return None, (jsonify({'error': 'Admin only'}), 403)
+    try:
+        sid = int(student_id)
+    except (TypeError, ValueError):
+        return None, (jsonify({'error': 'student_id must be an integer'}), 400)
+    target = User.query.get(sid)
+    if not target or target.role != 'student':
+        return None, (jsonify({'error': 'student not found'}), 404)
+    return target, None
+
+
+def _skill_snapshot(student_id, days=21):
+    since = datetime.utcnow() - timedelta(days=days)
+    rows = Submission.query.filter(
+        Submission.student_id == student_id,
+        Submission.submitted_at >= since,
+    ).all()
+
+    by_skill = {skill: {'submitted': 0, 'reviewed': 0} for skill in SKILLS}
+    for row in rows:
+        skill = (row.task.type if row.task else '').lower().strip()
+        if skill not in by_skill:
+            continue
+        by_skill[skill]['submitted'] += 1
+        if (row.status or '').lower() == 'reviewed':
+            by_skill[skill]['reviewed'] += 1
+    return by_skill, rows
+
+
+def _priority_skills(user, by_skill):
+    weak = [w.strip().lower() for w in (user.weak_areas or '').split(',') if w.strip()]
+    score_map = Counter()
+    for skill in SKILLS:
+        submitted = by_skill[skill]['submitted']
+        reviewed = by_skill[skill]['reviewed']
+        review_ratio = reviewed / submitted if submitted else 0
+        score_map[skill] += (1 - review_ratio) * 2
+        if submitted == 0:
+            score_map[skill] += 1.8
+        if any(skill[:4] in area or area[:4] in skill for area in weak):
+            score_map[skill] += 2.5
+
+    ranked = [skill for skill, _ in score_map.most_common()]
+    return ranked[:3] if ranked else ['writing', 'speaking', 'reading']
+
+
+@ai_bp.route('/writing/analyze', methods=['POST'])
+@jwt_required()
+def analyze_writing():
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({'error': 'text is required'}), 400
+
+    result = check_grammar(text)
+    return jsonify({
+        'transcript': text,
+        'analysis': result,
+        'band_estimate': None,
+        'evaluation_available': False,
+        'notice': 'Language checks are available. An official IELTS band estimate is not configured.',
+        'source': 'language-tool',
+    })
+
+
+@ai_bp.route('/writing/rewrite', methods=['POST'])
+@jwt_required()
+def rewrite_writing():
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({'error': 'text is required'}), 400
+
+    return jsonify({
+        'error': 'Writing rewrite is unavailable until a configured AI provider is enabled.',
+        'evaluation_available': False,
+    }), 503
+
+
+
+@ai_bp.route('/writing/timed-session', methods=['POST'])
+@jwt_required()
+def timed_writing_session():
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    minutes = int(data.get('minutes') or 0)
+    if not text:
+        return jsonify({'error': 'text is required'}), 400
+    if minutes <= 0:
+        minutes = 20
+
+    analysis = check_grammar(text)
+    words = max(len(text.split()), 1)
+    wpm = round(words / max(1, minutes) * 60, 1)
+
+    pace_note = None
+    if wpm < 15:
+        pace_note = 'Slow pace; try to plan and write with a clearer time allocation.'
+    elif wpm > 45:
+        pace_note = 'Fast pace; may have rushed structure and cohesion.'
+    else:
+        pace_note = 'Pacing is within expected ranges for practice sessions.'
+
+    suggestions = analysis.get('suggestions', [])[:6]
+    suggestions.append('Focus on paragraphing: ensure each paragraph has a clear topic sentence.')
+
+    return jsonify({
+        'transcript': text,
+        'analysis': analysis,
+        'words': words,
+        'minutes': minutes,
+        'wpm': wpm,
+        'band_estimate': None,
+        'evaluation_available': False,
+        'notice': 'Pacing and language indicators are available. An official IELTS band estimate is not configured.',
+        'pace_note': pace_note,
+        'suggestions': suggestions,
+        'source': 'timed-session-helper',
+    })
+
+
+@ai_bp.route('/speaking/analyze', methods=['POST'])
+@jwt_required()
+def analyze_speaking():
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    transcript = (data.get('transcript') or '').strip()
+    audio_url = (data.get('audio_url') or '').strip()
+
+    if not transcript and not audio_url:
+        return jsonify({'error': 'transcript or audio_url is required'}), 400
+
+    pronunciation_available = False
+    if not transcript and audio_url:
+        transcript_result = speech_to_text(audio_url)
+        transcript = transcript_result.get('transcript', '')
+    else:
+        transcript_result = {'mock': False, 'confidence': None}
+
+    words = transcript.split()
+    filler_words = ['uh', 'um', 'like', 'you know', 'basically', 'actually']
+    filler_count = sum(transcript.lower().count(filler) for filler in filler_words)
+
+    grammar = check_grammar(transcript)
+    fluency_score = max(30, min(100, 92 - filler_count * 4 - max(len(words) - 160, 0) * 0.2))
+    grammar_score = grammar['grammar_score']
+
+    return jsonify({
+        'transcript': transcript,
+        'analysis': {
+            'fluency_score': round(fluency_score, 1),
+            'pronunciation_score': None,
+            'grammar_score': grammar_score,
+            'filler_count': filler_count,
+            'suggestions': grammar['suggestions'],
+        },
+        'band_estimate': None,
+        'evaluation_available': False,
+        'pronunciation_available': pronunciation_available,
+        'notice': 'Transcript-based practice indicators are available. Pronunciation and official IELTS band scoring require audio-capable evaluation.',
+        'source': 'transcript-check',
+    })
+
+
+@ai_bp.route('/quiz/analyze', methods=['POST'])
+@jwt_required()
+def analyze_quiz():
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    score = float(data.get('score') or 0)
+    total = max(int(data.get('total') or 0), 1)
+    quiz_title = (data.get('quiz_title') or 'IELTS Quiz').strip()
+    category = (data.get('category') or 'general').strip()
+    correct = max(int(data.get('correct') or 0), 0)
+    weak_points = data.get('weak_points') or []
+
+    ratio = max(0.0, min(1.0, score / 100.0))
+    strengths = []
+    suggestions = []
+
+    if score >= 80:
+        strengths.append('Strong accuracy across most question types')
+        suggestions.append('Push time pressure with harder timed mock sets.')
+    elif score >= 60:
+        strengths.append('Solid understanding of the core IELTS pattern')
+        suggestions.append('Focus on eliminating avoidable mistakes in repeated topics.')
+    else:
+        strengths.append('You are building the base for the topic')
+        suggestions.append('Slow down and review the explanation after every question.')
+
+    if weak_points:
+        suggestions.extend([f'Revisit {point} with 10-minute drills.' for point in weak_points[:3]])
+    else:
+        suggestions.append(f'Practice more {category} questions from {quiz_title}.')
+
+    suggestions.append('Retake this quiz after one focused revision session.')
+
+    return jsonify({
+        'quiz_title': quiz_title,
+        'category': category,
+        'analysis': {
+            'strengths': strengths,
+            'suggestions': suggestions,
+            'accuracy': round(ratio * 100, 1),
+            'correct': correct,
+            'total': total,
+        },
+        'band_estimate': None,
+        'evaluation_available': False,
+        'notice': 'Quiz accuracy and coaching tips are available. An official IELTS band estimate is not configured.',
+        'source': 'rule-based-coach',
+    })
+
+
+@ai_bp.route('/debate/analyze', methods=['POST'])
+@jwt_required()
+def analyze_debate():
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    argument = (data.get('argument') or '').strip()
+    topic = (data.get('topic') or 'general topic').strip()
+    if not argument:
+        return jsonify({'error': 'argument is required'}), 400
+
+    words = [w for w in argument.split() if w]
+    token_count = len(words)
+
+    # Reject arguments that are too short to be meaningful
+    if token_count < 20:
+        return jsonify({'error': 'Please write at least 20 words for a meaningful analysis.'}), 400
+
+    # Reject gibberish: require at least 60% alphabetic words
+    alpha_words = [w for w in words if re.sub(r"[^a-zA-Z]", "", w)]
+    if len(alpha_words) / token_count < 0.60:
+        return jsonify({'error': 'Your argument contains too many non-English characters. Please write in English.'}), 400
+
+    connector_pool = ['however', 'therefore', 'moreover', 'although', 'because', 'while', 'whereas', 'consequently']
+    connector_count = sum(argument.lower().count(connector) for connector in connector_pool)
+    lexical_variety = len(set(w.lower().strip('.,!?') for w in words)) / max(token_count, 1)
+
+    structure_score = min(100, 45 + connector_count * 12 + min(token_count, 140) * 0.2)
+    # Cap vocabulary benefit by a length factor so short texts cannot score 100
+    length_factor = min(1.0, token_count / 80)
+    vocabulary_score = min(100, (40 + lexical_variety * 65) * length_factor)
+    argument_score = min(100, round((structure_score * 0.55) + (vocabulary_score * 0.45), 1))
+
+    tips = [
+        'State your main claim in the opening sentence before evidence.',
+        'Use one counterargument and rebuttal to strengthen logic.',
+        'Conclude by restating impact, not only the opinion.',
+    ]
+    if connector_count < 2:
+        tips.insert(0, 'Use linking devices like however, therefore, and consequently for coherence.')
+    if token_count < 60:
+        tips.insert(0, 'Expand your argument with one concrete example to improve depth.')
+
+    return jsonify({
+        'topic': topic,
+        'analysis': {
+            'argument_strength': round(argument_score, 1),
+            'structure_score': round(structure_score, 1),
+            'vocabulary_score': round(vocabulary_score, 1),
+            'word_count': token_count,
+            'connector_count': connector_count,
+            'tips': tips,
+        },
+        'band_estimate': None,
+        'evaluation_available': False,
+        'notice': 'Argument structure indicators are available. An official IELTS band estimate is not configured.',
+        'source': 'rule-based-debate',
+    })
+
+
+@ai_bp.route('/study-plan', methods=['GET'])
+@jwt_required()
+def study_plan():
+        """
+        Generate a personalized 7-day AI study plan
+        ---
+        tags:
+            - AI
+        security:
+            - Bearer: []
+        parameters:
+            - name: student_id
+                in: query
+                type: integer
+                required: false
+                description: Admin-only override for specific student.
+        responses:
+            200:
+                description: Personalized study plan
+            403:
+                description: Forbidden
+        """
+        uid = int(get_jwt_identity())
+        requester = User.query.get(uid)
+        if not requester:
+                return jsonify({'error': 'Unauthorized'}), 401
+
+        target, err = _resolve_target_student(requester, request.args.get('student_id'))
+        if err:
+                return err
+
+        by_skill, recent_subs = _skill_snapshot(target.id)
+        priorities = _priority_skills(target, by_skill)
+        total_recent = len(recent_subs)
+        reviewed_recent = sum(1 for row in recent_subs if (row.status or '').lower() == 'reviewed')
+        review_rate = round((reviewed_recent / total_recent) * 100, 1) if total_recent else 0.0
+
+        weekly_plan = []
+        for day in range(1, 8):
+                focus = priorities[(day - 1) % len(priorities)]
+                weekly_plan.append({
+                        'day': day,
+                        'focus_skill': focus,
+                        'duration_min': 45 if day % 3 else 60,
+                        'mission': f'Practice {focus} with one timed drill and one reflection pass.',
+                        'tasks': [
+                                f'Warm-up: 10 minutes of focused {focus} review.',
+                                f'Main set: one IELTS-style {focus} task under time pressure.',
+                                'Reflection: capture 3 mistakes and 1 improvement target.',
+                        ],
+                })
+
+        return jsonify({
+                'student': {
+                        'id': target.id,
+                        'name': target.name,
+                        'estimated_band': target.score,
+                        'streak': target.streak,
+                },
+                'insights': {
+                        'recent_submissions': total_recent,
+                        'review_rate_percent': review_rate,
+                        'weak_areas': [w.strip() for w in (target.weak_areas or '').split(',') if w.strip()],
+                },
+                'priority_skills': priorities,
+                'weekly_plan': weekly_plan,
+                'coach_message': 'Consistency beats intensity. Complete at least 5 of 7 days for measurable score gains.',
+                'source': 'rule-based-study-planner',
+        })
+
+
+@ai_bp.route('/drill/next', methods=['POST'])
+@jwt_required()
+def next_drill():
+        """
+        Generate the next best AI drill for the student
+        ---
+        tags:
+            - AI
+        security:
+            - Bearer: []
+        parameters:
+            - name: body
+                in: body
+                required: false
+                schema:
+                    properties:
+                        preferred_skill:
+                            type: string
+                        minutes:
+                            type: integer
+                        student_id:
+                            type: integer
+        responses:
+            200:
+                description: Next drill recommendation
+            403:
+                description: Forbidden
+        """
+        uid = int(get_jwt_identity())
+        requester = User.query.get(uid)
+        if not requester:
+                return jsonify({'error': 'Unauthorized'}), 401
+
+        data = request.get_json(silent=True) or {}
+        target, err = _resolve_target_student(requester, data.get('student_id'))
+        if err:
+                return err
+
+        by_skill, _ = _skill_snapshot(target.id, days=14)
+        priorities = _priority_skills(target, by_skill)
+        preferred = (data.get('preferred_skill') or '').strip().lower()
+        focus = preferred if preferred in SKILLS else priorities[0]
+
+        try:
+                minutes = int(data.get('minutes', 20))
+        except (TypeError, ValueError):
+                minutes = 20
+        minutes = max(10, min(minutes, 60))
+
+        drill_bank = {
+                'reading': {
+                        'title': 'Precision Skim + T/F/NG Sprint',
+                        'prompt': 'Read one medium passage and answer 8 True/False/Not Given items in one sitting.',
+                        'success_criteria': 'At least 6/8 correct with < 2 inference mistakes.',
+                },
+                'listening': {
+                        'title': 'Number & Detail Capture Drill',
+                        'prompt': 'Listen to one section and capture names, dates, times, and numbers on first pass.',
+                        'success_criteria': 'At least 80% detail accuracy in your notes.',
+                },
+                'writing': {
+                        'title': 'Thesis + Topic Sentence Builder',
+                        'prompt': 'Write intro + two body topic sentences for one Task 2 prompt before full essay.',
+                        'success_criteria': 'Clear position and logical paragraph progression.',
+                },
+                'speaking': {
+                        'title': '2-Minute Fluency Loop',
+                        'prompt': 'Record one 2-minute response, review filler words, then re-record improved version.',
+                        'success_criteria': 'Second attempt has fewer fillers and tighter structure.',
+                },
+                'grammar': {
+                        'title': 'Accuracy Repair Set',
+                        'prompt': 'Fix 10 sentence-level grammar errors and rewrite each sentence in one variation.',
+                        'success_criteria': '9/10 corrected accurately with clear rule awareness.',
+                },
+        }
+
+        selected = drill_bank[focus]
+        return jsonify({
+                'student_id': target.id,
+                'focus_skill': focus,
+                'duration_min': minutes,
+                'drill': {
+                        'title': selected['title'],
+                        'prompt': selected['prompt'],
+                        'checklist': [
+                                'Set a timer and complete in one uninterrupted session.',
+                                'Mark mistakes immediately after finishing.',
+                                'Write one improvement rule before next attempt.',
+                        ],
+                        'success_criteria': selected['success_criteria'],
+                },
+                'next_step': f'After this drill, take a short {focus} quiz and compare accuracy.',
+                'source': 'rule-based-drill-recommender',
+        })
+
+
+@ai_bp.route('/writing/brainstorm', methods=['POST'])
+@jwt_required()
+def brainstorm_writing():
+    """Generate IELTS essay ideas, structure, and high-value vocabulary."""
+    uid = int(get_jwt_identity())
+    requester = User.query.get(uid)
+    if not requester:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    topic = (data.get('topic') or '').strip()
+    stance = (data.get('stance') or 'balanced').strip().lower()
+    if not topic:
+        return jsonify({'error': 'topic is required'}), 400
+
+    intro = f"This essay examines {topic.lower()} by evaluating both immediate and long-term effects."
+    idea_pool = [
+        {
+            'point': 'Primary benefit',
+            'detail': f'One clear advantage of {topic.lower()} is improved efficiency in daily systems.',
+            'example': 'For instance, urban services can be delivered faster with better coordination.',
+        },
+        {
+            'point': 'Main drawback',
+            'detail': f'A key concern is unequal access, which may widen social gaps if {topic.lower()} is poorly managed.',
+            'example': 'Rural and low-income groups often receive benefits later than urban populations.',
+        },
+        {
+            'point': 'Practical solution',
+            'detail': 'Policy design should combine regulation, awareness, and targeted investment.',
+            'example': 'Governments can fund pilot programs before full rollout to reduce risks.',
+        },
+    ]
+
+    if stance == 'agree':
+        thesis = f"Overall, I agree that {topic.lower()} brings more advantages than disadvantages when implemented responsibly."
+    elif stance == 'disagree':
+        thesis = f"Overall, I disagree, because the long-term risks of {topic.lower()} can outweigh short-term gains."
+    else:
+        thesis = f"Overall, a balanced view is needed: {topic.lower()} can be beneficial only with effective safeguards."
+
+    vocabulary = [
+        'long-term implications',
+        'socioeconomic disparity',
+        'policy intervention',
+        'sustainable implementation',
+        'measurable outcomes',
+        'public accountability',
+    ]
+
+    return jsonify({
+        'topic': topic,
+        'thesis': thesis,
+        'intro_hook': intro,
+        'body_ideas': idea_pool,
+        'conclusion_line': 'In conclusion, effective governance determines whether this trend becomes an opportunity or a liability.',
+        'vocabulary': vocabulary,
+        'source': 'rule-based-brainstormer',
+    })
+
+
+@ai_bp.route('/speaking/followups', methods=['POST'])
+@jwt_required()
+def speaking_followups():
+    """Generate IELTS-style follow-up questions and model cues for speaking practice."""
+    uid = int(get_jwt_identity())
+    requester = User.query.get(uid)
+    if not requester:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    topic = (data.get('topic') or '').strip()
+    level = (data.get('level') or 'intermediate').strip().lower()
+    if not topic:
+        return jsonify({'error': 'topic is required'}), 400
+
+    base_questions = [
+        f"Why do you think {topic.lower()} matters in modern society?",
+        f"Can you compare how {topic.lower()} affects younger and older generations?",
+        f"What challenges might appear if governments ignore {topic.lower()}?",
+        f"How could schools better prepare students for issues related to {topic.lower()}?",
+        f"Do you think attitudes toward {topic.lower()} will change in the next decade? Why?",
+    ]
+
+    if level == 'advanced':
+        base_questions.append(
+            f"To what extent should economic priorities be sacrificed to address concerns around {topic.lower()}?"
+        )
+
+    model_cues = [
+        'Start with a direct position in one sentence.',
+        'Add one real-world example or contrast.',
+        'Use one linker: however, moreover, consequently, or whereas.',
+        'Close with a short implication statement.',
+    ]
+
+    return jsonify({
+        'topic': topic,
+        'level': level,
+        'follow_up_questions': base_questions,
+        'model_cues': model_cues,
+        'source': 'rule-based-followup-generator',
+    })
+
+
+@ai_bp.route('/progress/risk-report', methods=['GET'])
+@jwt_required()
+def progress_risk_report():
+    """Estimate score-plateau risk and provide corrective actions from recent learning activity."""
+    uid = int(get_jwt_identity())
+    requester = User.query.get(uid)
+    if not requester:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    student, err = _resolve_target_student(requester, request.args.get('student_id'))
+    if err:
+        return err
+
+    by_skill, recent = _skill_snapshot(student.id, days=28)
+    total = len(recent)
+    reviewed = sum(1 for row in recent if (row.status or '').lower() == 'reviewed')
+    review_rate = (reviewed / total) if total else 0
+    diversity = sum(1 for skill in SKILLS if by_skill[skill]['submitted'] > 0)
+
+    risk_score = 0
+    if total < 6:
+        risk_score += 45
+    if review_rate < 0.5:
+        risk_score += 30
+    if diversity < 3:
+        risk_score += 25
+    risk_score = min(risk_score, 100)
+
+    if risk_score >= 70:
+        risk_level = 'high'
+    elif risk_score >= 40:
+        risk_level = 'moderate'
+    else:
+        risk_level = 'low'
+
+    actions = [
+        'Complete at least 5 focused sessions per week.',
+        'Request feedback on every second submission to accelerate correction loops.',
+        'Rotate across reading, listening, writing, and speaking to avoid single-skill stagnation.',
+    ]
+    if diversity < 3:
+        actions.insert(0, 'Add two under-practiced skills this week to improve score balance.')
+
+    return jsonify({
+        'student': {
+            'id': student.id,
+            'name': student.name,
+            'estimated_band': student.score,
+            'streak': student.streak,
+        },
+        'risk': {
+            'level': risk_level,
+            'score': risk_score,
+            'recent_submissions': total,
+            'review_rate_percent': round(review_rate * 100, 1),
+            'skill_diversity': diversity,
+        },
+        'actions': actions,
+        'source': 'rule-based-risk-model',
+    })
+
+
+# ============ WRITING FEATURES ============
+
+@ai_bp.route('/writing/structure', methods=['POST'])
+@jwt_required()
+def check_essay_structure():
+    """Check if essay contains Introduction, Body 1, Body 2, and Conclusion."""
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    
+    if not text:
+        return jsonify({'error': 'text is required'}), 400
+    
+    # Simple paragraph detection
+    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+    
+    structure = {
+        'has_introduction': False,
+        'has_body_1': False,
+        'has_body_2': False,
+        'has_conclusion': False,
+        'missing': []
+    }
+    
+    # Keyword-based detection
+    intro_keywords = ['introduction', 'this essay', 'will discuss', 'agree', 'disagree', 'opinion']
+    body_keywords = ['firstly', 'secondly', 'moreover', 'furthermore', 'in addition', 'on the one hand']
+    conclusion_keywords = ['conclusion', 'to conclude', 'in summary', 'overall', 'to sum up']
+    
+    for para in paragraphs:
+        para_lower = para.lower()
+        if not structure['has_introduction'] and any(kw in para_lower for kw in intro_keywords):
+            structure['has_introduction'] = True
+        elif not structure['has_conclusion'] and any(kw in para_lower for kw in conclusion_keywords):
+            structure['has_conclusion'] = True
+        elif any(kw in para_lower for kw in body_keywords):
+            if not structure['has_body_1']:
+                structure['has_body_1'] = True
+            elif not structure['has_body_2']:
+                structure['has_body_2'] = True
+    
+    if not structure['has_introduction']:
+        structure['missing'].append('Introduction')
+    if not structure['has_body_1']:
+        structure['missing'].append('Body paragraph 1')
+    if not structure['has_body_2']:
+        structure['missing'].append('Body paragraph 2')
+    if not structure['has_conclusion']:
+        structure['missing'].append('Conclusion')
+    
+    structure['complete'] = len(structure['missing']) == 0
+    return jsonify(structure)
+
+
+@ai_bp.route('/writing/cohesive', methods=['POST'])
+@jwt_required()
+def analyze_cohesive_devices():
+    """Analyze cohesive device density compared to band 7+ threshold."""
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    
+    if not text:
+        return jsonify({'error': 'text is required'}), 400
+    
+    cohesive_devices = [
+        'however', 'moreover', 'furthermore', 'consequently', 'therefore',
+        'in addition', 'additionally', 'nevertheless', 'nonetheless',
+        'on the other hand', 'in contrast', 'conversely', 'as a result',
+        'hence', 'thus', 'accordingly', 'for instance', 'for example',
+        'in particular', 'specifically', 'firstly', 'secondly', 'finally'
+    ]
+    
+    word_count = len(text.split())
+    count = sum(text.lower().count(device) for device in cohesive_devices)
+    density = (count / word_count) * 100 if word_count > 0 else 0
+    target_density = 4.5  # ~11 per 250 words
+    band = '7+' if density >= target_density else '6' if density >= 3 else '5-'
+    
+    # Highlight devices in text
+    highlighted = text
+    for device in cohesive_devices:
+        highlighted = highlighted.replace(
+            device, f'<mark class="cohesive">{device}</mark>'
+        )
+        highlighted = highlighted.replace(
+            device.capitalize(), f'<mark class="cohesive">{device.capitalize()}</mark>'
+        )
+    
+    return jsonify({
+        'count': count,
+        'word_count': word_count,
+        'density': round(density, 1),
+        'target_density': target_density,
+        'band': band,
+        'highlighted_text': highlighted
+    })
+
+
+@ai_bp.route('/writing/cliches', methods=['POST'])
+@jwt_required()
+def detect_cliches():
+    """Detect banned IELTS clichés and suggest alternatives."""
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    
+    if not text:
+        return jsonify({'error': 'text is required'}), 400
+    
+    cliches = {
+        'nowadays': 'Currently, In recent years, These days',
+        'every coin has two sides': 'This issue has both advantages and disadvantages',
+        'i strongly believe': 'It is evident that, The evidence suggests',
+        'in a nutshell': 'To summarise, In conclusion',
+        'controversial topic': 'widely debated issue, subject of discussion',
+        'double-edged sword': 'has both benefits and drawbacks',
+        'last but not least': 'finally, additionally',
+        'it goes without saying': 'clearly, evidently',
+        'first and foremost': 'primarily, most importantly'
+    }
+    
+    found = []
+    text_lower = text.lower()
+    for cliche, alternative in cliches.items():
+        if cliche in text_lower:
+            found.append({
+                'cliche': cliche,
+                'alternative': alternative,
+                'count': text_lower.count(cliche)
+            })
+    
+    return jsonify({'cliches': found})
+
+
+# ============ SPEAKING FEATURES ============
+
+@ai_bp.route('/speaking/part3-depth', methods=['POST'])
+@jwt_required()
+def check_part3_depth():
+    """Check if Part 3 answer has reason, example, and contrasting viewpoint."""
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json(silent=True) or {}
+    answer = (data.get('answer') or '').strip()
+    
+    if not answer:
+        return jsonify({'error': 'answer is required'}), 400
+    
+    depth_indicators = {
+        'reason': ['because', 'since', 'due to', 'the reason is', 'this is because'],
+        'example': ['for example', 'for instance', 'such as', 'like', 'specifically'],
+        'contrast': ['however', 'on the other hand', 'although', 'while', 'whereas', 'some people think']
+    }
+    
+    answer_lower = answer.lower()
+    depth = {
+        'has_reason': any(kw in answer_lower for kw in depth_indicators['reason']),
+        'has_example': any(kw in answer_lower for kw in depth_indicators['example']),
+        'has_contrast': any(kw in answer_lower for kw in depth_indicators['contrast'])
+    }
+    
+    depth['score'] = sum([depth['has_reason'], depth['has_example'], depth['has_contrast']])
+    depth['feedback'] = []
+    
+    if not depth['has_reason']:
+        depth['feedback'].append("Add a reason: 'because...' or 'the reason is...'")
+    if not depth['has_example']:
+        depth['feedback'].append("Add an example: 'for example, in my country...' or 'such as...'")
+    if not depth['has_contrast']:
+        depth['feedback'].append("Add a contrasting view: 'however, some people believe...' or 'on the other hand...'")
+    
+    depth['band'] = None
+    depth['evaluation_available'] = False
+    depth['notice'] = 'This is a practice depth checklist, not an IELTS band estimate.'
+    
+    return jsonify(depth)
+
+
+@ai_bp.route('/speaking/tense-consistency', methods=['POST'])
+@jwt_required()
+def check_tense_consistency():
+    """Check for tense consistency in spoken narrative."""
+    uid = int(get_jwt_identity())
+    if not User.query.get(uid):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json(silent=True) or {}
+    transcript = (data.get('transcript') or '').strip()
+    
+    if not transcript:
+        return jsonify({'error': 'transcript is required'}), 400
+    
+    past_indicators = ['went', 'was', 'were', 'had', 'did', 'visited', 'saw', 'ate', 'drove', 'stayed']
+    present_indicators = ['go', 'is', 'am', 'are', 'have', 'do', 'visit', 'see', 'eat', 'drive', 'stay']
+    
+    sentences = transcript.split('.')
+    issues = []
+    
+    for i, sentence in enumerate(sentences):
+        sentence_lower = sentence.lower()
+        has_past = any(past in sentence_lower for past in past_indicators)
+        has_present = any(present in sentence_lower for present in present_indicators)
+        
+        if has_past and has_present and i > 0:
+            issues.append({
+                'sentence': sentence.strip(),
+                'issue': 'Mixed past and present tense in same sentence/context'
+            })
+    
+    return jsonify({
+        'has_issues': len(issues) > 0,
+        'issues': issues,
+        'suggestion': 'Choose one tense for past events (past simple) and stick to it throughout the narrative.'
+    })

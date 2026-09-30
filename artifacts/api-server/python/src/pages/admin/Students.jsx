@@ -1,0 +1,372 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { studentsAPI, plansAPI, quizzesAPI } from '../../services/api';
+import { Card } from '../../components/ui/Card';
+import { Button } from '../../components/ui/Button';
+import { Badge } from '../../components/ui/Badge';
+import { Modal, ConfirmModal } from '../../components/ui/Modal';
+import { SkeletonList } from '../../components/ui/Skeleton';
+import { useNotification } from '../../contexts/NotificationContext';
+import DotMenu from '../../components/ui/DotMenu';
+
+function ThreeDotMenu({ items }) {
+  return (
+    <DotMenu
+      items={items.map((item) => (
+        item === 'divider'
+          ? '---'
+          : {
+              icon: item.icon,
+              label: item.label,
+              danger: item.danger,
+              action: item.onClick,
+            }
+      ))}
+    />
+  );
+}
+
+function StudentProfileModal({ student, plans, open, onClose, onSaved }) {
+  const { success, error: notifyError } = useNotification();
+  const [tab, setTab] = useState('info');
+  const [editForm, setEditForm] = useState({ name: '', zoom_link: '', weak_areas: '' });
+  const [newPass, setNewPass] = useState('');
+  const [planId, setPlanId] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (student) {
+      setEditForm({ name: student.name || '', zoom_link: student.zoom_link || '', weak_areas: Array.isArray(student.weak_areas) ? student.weak_areas.join(', ') : (student.weak_areas || '') });
+      setPlanId(student.plan_id || '');
+    }
+  }, [student]);
+
+  if (!student) return null;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await studentsAPI.update(student.id, { ...editForm, weak_areas: editForm.weak_areas.split(',').map(s => s.trim()).filter(Boolean) });
+      if (planId && planId !== student.plan_id) {
+        await studentsAPI.update(student.id, { plan_id: parseInt(planId) });
+      }
+      success('Student updated!');
+      onSaved();
+    } catch (e) { notifyError(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const resetPassword = async () => {
+    if (!newPass || newPass.length < 6) { notifyError('Min 6 characters'); return; }
+    setSaving(true);
+    try {
+      await studentsAPI.resetPassword(student.id, newPass);
+      success('Password reset!');
+      setNewPass('');
+    } catch (e) { notifyError(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const createReviewDrill = async () => {
+    setSaving(true);
+    try {
+      const drills = await quizzesAPI.reviewDrills({ count: 8, userId: student.id });
+      if (!drills || drills.length === 0) {
+        notifyError('No review drills available for this student.');
+        return;
+      }
+      const payload = {
+        title: `Review Drill for ${student.name}`,
+        category: 'learning',
+        difficulty: 'intermediate',
+        time_limit_min: 10,
+        questions: drills.map((d) => ({
+          question: d.question || d.text || '',
+          options: d.options || d.opts || [],
+          correct: typeof d.correct === 'number' ? d.correct : (d.correct_index || 0),
+          explanation: d.explanation || '',
+        })),
+      };
+      await quizzesAPI.create(payload);
+      success('Review drill created as a quiz.');
+      onSaved && onSaved();
+    } catch (e) { notifyError(e.message || 'Failed to create review drill'); }
+    finally { setSaving(false); }
+  };
+
+  const inp = { width: '100%', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'inherit' };
+
+  const tabs = ['info', 'plan', 'password'];
+
+  return (
+    <Modal open={open} onClose={onClose} title={`👤 ${student.name}`}
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>Close</Button>
+        {tab === 'info' && <Button onClick={save} loading={saving}>Save Changes</Button>}
+        {tab === 'password' && <Button onClick={resetPassword} loading={saving}>Reset Password</Button>}
+      </>}
+    >
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
+        {tabs.map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{
+            padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            background: tab === t ? 'var(--accent)' : 'var(--bg3)', color: tab === t ? '#fff' : 'var(--muted)',
+            border: `1px solid ${tab === t ? 'var(--accent)' : 'var(--border)'}`,
+          }}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
+        ))}
+      </div>
+
+      {tab === 'info' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', gap: 12, padding: 14, background: 'var(--bg3)', borderRadius: 12, marginBottom: 4 }}>
+            <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg,var(--accent),var(--accent2))', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, flexShrink: 0 }}>{student.name?.[0]}</div>
+            <div>
+              <div style={{ fontWeight: 700 }}>{student.email}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>Joined · Score: {student.score || 0} · Streak: {student.streak || 0}🔥</div>
+            </div>
+          </div>
+          <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase' }}>Full Name</label><input style={inp} value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase' }}>Zoom / Jitsi Link</label><input style={inp} value={editForm.zoom_link} onChange={e => setEditForm(f => ({ ...f, zoom_link: e.target.value }))} placeholder="https://meet.jit.si/room" /></div>
+          <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase' }}>Weak Areas (comma-separated)</label><input style={inp} value={editForm.weak_areas} onChange={e => setEditForm(f => ({ ...f, weak_areas: e.target.value }))} placeholder="grammar, speaking, writing" /></div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="ghost" size="sm" onClick={createReviewDrill} loading={saving}>Create Review Drill</Button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'plan' && (
+        <div>
+          <div style={{ marginBottom: 14, fontSize: 13, color: 'var(--muted)' }}>Current plan ID: <strong>{student.plan_id || 'None'}</strong></div>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase' }}>Assign Plan</label>
+          <select style={inp} value={planId} onChange={e => setPlanId(e.target.value)}>
+            <option value="">— No Plan —</option>
+            {plans.map(p => <option key={p.id} value={p.id}>{p.name} ({p.duration_days}d)</option>)}
+          </select>
+          <Button style={{ marginTop: 14 }} onClick={save} loading={saving}>Save Plan Assignment</Button>
+        </div>
+      )}
+
+      {tab === 'password' && (
+        <div>
+          <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>Set a new password for {student.name}. Minimum 6 characters.</p>
+          <input type="password" style={inp} value={newPass} onChange={e => setNewPass(e.target.value)} placeholder="New password" />
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+export default function AdminStudents() {
+  const { success, error: notifyError } = useNotification();
+  const [students, setStudents] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [audits, setAudits] = useState([]);
+  const [profileTarget, setProfileTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [saving, setSaving] = useState(false);
+    const [bulkCount, setBulkCount] = useState('8');
+    const [bulkMinFreq, setBulkMinFreq] = useState('1');
+    const [bulkCategory, setBulkCategory] = useState('');
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([studentsAPI.getAll(), plansAPI.getAll()])
+      .then(([s, p]) => { setStudents(s || []); setPlans(p || []); })
+      .catch((err) => { notifyError(err.message || 'Failed to load data'); })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const filtered = students.filter(s =>
+    s.name?.toLowerCase().includes(search.toLowerCase()) ||
+    s.email?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const createStudent = async () => {
+    if (!form.name || !form.email || !form.password) return;
+    setSaving(true);
+    try {
+      await studentsAPI.create(form);
+      success('Student created!');
+      setCreateOpen(false);
+      setForm({ name: '', email: '', password: '' });
+      load();
+    } catch (e) { notifyError(e.message || 'Failed to create student'); }
+    finally { setSaving(false); }
+  };
+
+  const deleteStudent = async (id) => {
+    try {
+      await studentsAPI.delete(id);
+      success('Student removed.');
+      load();
+    } catch (e) { notifyError(e.message || 'Failed to delete student'); }
+  };
+
+  const inp = {
+    width: '100%', background: 'var(--bg3)', border: '1px solid var(--border)',
+    borderRadius: 10, padding: '10px 14px', color: 'var(--text)', fontSize: 13, outline: 'none',
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }} className="fade-up">
+        <div style={{ fontFamily: 'Fraunces, serif', fontSize: 22, fontWeight: 700 }}>Students 👥</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+          <Button size="sm" variant="ghost" onClick={() => setBulkOpen(true)}>Run Bulk Review</Button>
+          <Button size="sm" variant="ghost" onClick={async () => { try { const res = await quizzesAPI.getReviewAudits(); setAudits(res || []); setAuditOpen(true); } catch (e) { notifyError(e.message); } }}>View Review Audits</Button>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>+ Add Student</Button>
+        </div>
+      </div>
+
+      <Card className="fade-up-2" style={{ marginBottom: 16, padding: '10px 14px' }}>
+        <input value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="🔍 Search by name or email…" style={{ ...inp, background: 'transparent', border: 'none' }} />
+      </Card>
+
+      {loading ? <SkeletonList count={6} cardHeight={70} /> : filtered.length === 0 ? (
+        <Card style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
+          No students found.
+        </Card>
+      ) : filtered.map((s) => (
+        <Card key={s.id} className="fade-up-3" style={{ marginBottom: 10, padding: '14px 18px', cursor: 'pointer' }} onClick={() => setProfileTarget(s)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: '50%',
+              background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
+              color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 15, fontWeight: 700, flexShrink: 0,
+            }}>
+              {s.name?.[0] || '?'}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.email}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
+              {s.score > 0 && <Badge label={`${s.score} pts`} color="gold" size="xs" />}
+              {s.streak > 0 && <Badge label={`${s.streak}🔥`} color="warn" size="xs" />}
+              <Button size="xs" variant="ghost" onClick={() => setDeleteTarget(s)}>Remove</Button>
+            </div>
+          </div>
+        </Card>
+      ))}
+
+      {/* Create Modal */}
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Add Student"
+        footer={<>
+          <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
+          <Button onClick={createStudent} loading={saving} disabled={!form.name || !form.email || !form.password}>Create</Button>
+        </>}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {['name', 'email', 'password'].map((f) => (
+            <div key={f}>
+              <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6, fontWeight: 500, textTransform: 'capitalize' }}>{f}</label>
+              <input type={f === 'password' ? 'password' : f === 'email' ? 'email' : 'text'}
+                value={form[f]} onChange={(e) => setForm((c) => ({ ...c, [f]: e.target.value }))}
+                style={inp} placeholder={f === 'name' ? 'Full Name' : f === 'email' ? 'email@example.com' : 'Secure password'} />
+            </div>
+          ))}
+        </div>
+      </Modal>
+
+      {/* Bulk Review Modal */}
+      <Modal open={bulkOpen} onClose={() => setBulkOpen(false)} title="Run Bulk Review"
+        footer={<>
+          <Button variant="ghost" onClick={() => setBulkOpen(false)}>Cancel</Button>
+          <Button onClick={async () => {
+            try {
+              const res = await quizzesAPI.createBulkReview({ count: bulkCount, minFrequency: bulkMinFreq, category: bulkCategory || undefined });
+              success(`Created ${res.created || 0} quizzes`);
+              setBulkOpen(false);
+              load();
+            } catch (e) { notifyError(e.message || 'Bulk generation failed'); }
+          }}>Run</Button>
+        </>}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Questions per quiz</label>
+            <input style={inp} value={bulkCount} onChange={e => setBulkCount(e.target.value)} />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Min mistake frequency</label>
+            <input style={inp} value={bulkMinFreq} onChange={e => setBulkMinFreq(e.target.value)} />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Category (optional)</label>
+            <input style={inp} value={bulkCategory} onChange={e => setBulkCategory(e.target.value)} placeholder="reading, listening, writing, speaking" />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Audits Modal */}
+      <Modal open={auditOpen} onClose={() => setAuditOpen(false)} title="Review Generation Audits"
+        footer={<>
+          <Button variant="ghost" onClick={() => setAuditOpen(false)}>Close</Button>
+          <Button onClick={async () => {
+            try {
+              // attempt direct CSV download from server
+              const res = await quizzesAPI.exportReviewAuditsCsv();
+              if (typeof res === 'string') {
+                const blob = new Blob([res], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'review_audits.csv'; document.body.appendChild(a); a.click(); a.remove();
+                URL.revokeObjectURL(url);
+                return;
+              }
+              // Fallback: build CSV client-side
+              const rows = audits;
+              if (!rows || rows.length === 0) return;
+              const header = Object.keys(rows[0]);
+              const csv = [header.join(',')].concat(rows.map(r => header.map(h => `"${(r[h]||'').toString().replace(/"/g,'""')}"`).join(','))).join('\n');
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a'); a.href = url; a.download = 'review_audits.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+            } catch (e) { notifyError(e.message || 'Export failed'); }
+          }}>Export CSV</Button>
+        </>}
+      >
+        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+          {audits.length === 0 ? <div style={{ color: 'var(--muted)' }}>No audits found.</div> : audits.map(a => (
+            <div key={a.id} style={{ padding: 10, borderRadius: 8, background: 'var(--bg3)', marginBottom: 8 }}>
+              <div style={{ fontWeight: 700 }}>Quiz {a.quiz_id} for Student {a.student_id}</div>
+              <div style={{ color: 'var(--muted)', fontSize: 13 }}>Questions: {a.question_count} · By: {a.creator_id} · On: {new Date(a.created_at).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+
+      {/* Student Profile Modal */}
+      <StudentProfileModal
+        student={profileTarget}
+        plans={plans}
+        open={!!profileTarget}
+        onClose={() => setProfileTarget(null)}
+        onSaved={() => {
+          setProfileTarget(null);
+          load();
+        }}
+      />
+
+      {/* Confirm Delete */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteStudent(deleteTarget?.id)}
+        title="Remove Student"
+        message={`Are you sure you want to remove ${deleteTarget?.name}? This action cannot be undone.`}
+        confirmLabel="Remove"
+        danger
+      />
+    </div>
+  );
+}

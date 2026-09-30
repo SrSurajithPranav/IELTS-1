@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "IELTS Learning Platform"
+description = "A persistent IELTS learning platform with student practice, teacher review, progress tracking, vocabulary, mistakes, and honest availability states for external services."
+version = "1.0.0"
+id = "artifacts/ielts-platform"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22002
+
+[services.development]
+run = "pnpm --filter @workspace/ielts-platform run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ielts-platform", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/ielts-platform/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22002"
+BASE_PATH = "/"

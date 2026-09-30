@@ -1,0 +1,24 @@
+{
+  "name": "ielts-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "framer-motion": "^11.18.2",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-router-dom": "^6.30.3",
+    "recharts": "^2.15.4",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "terser": "^5.47.1",
+    "vite": "^5.0.0"
+  }
+}
