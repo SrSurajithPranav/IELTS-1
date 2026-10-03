@@ -1,6 +1,6 @@
 kind = "api"
-previewPath = "/api" # TODO - should be excluded from preview in the first place
-title = "API Server"
+previewPath = "/api"
+title = "IELTS API Server"
 version = "1.0.0"
 id = "3B4_FFSkEVBkAeYMFRJ2e"
 
@@ -10,24 +10,18 @@ name = "API Server"
 paths = ["/api"]
 
 [services.development]
-run = "pnpm --filter @workspace/api-server run dev"
-
-[services.production]
+run = "cd python && python app.py"
 
 [services.production.build]
-args = ["pnpm", "--filter", "@workspace/api-server", "run", "build"]
+args = ["python", "-m", "compileall", "python"]
 
 [services.production.build.env]
-NODE_ENV = "production"
+FLASK_ENV = "production"
 
 [services.production.run]
-# we don't run through pnpm to make startup faster in production
-args = ["sh", "-c", "exec python -m gunicorn --chdir backend wsgi:app --bind 0.0.0.0:${PORT:-8080} --workers 2 --threads 2 --timeout 120"]
+args = ["gunicorn", "--chdir", "python", "--bind", "0.0.0.0:8080", "app:app"]
 
 [services.production.run.env]
 PORT = "8080"
-NODE_ENV = "production"
 FLASK_ENV = "production"
-
-[services.production.health.startup]
-path = "/api/health"
+FLASK_DEBUG = "0"

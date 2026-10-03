@@ -3,14 +3,15 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { API_BASE_URL } from '../services/api';
 
-function InputField({ label, type = 'text', value, onChange, placeholder, onKeyDown }) {
+function InputField({ label, id, type = 'text', value, onChange, placeholder }) {
   const [focused, setFocused] = useState(false);
   return (
     <div>
       <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6, fontWeight: 500 }}>
         {label}
       </label>
-      <input
+        <input
+          id={id}
         type={type}
         value={value}
         onChange={onChange}
@@ -77,8 +78,8 @@ export default function LoginPage() {
           }}>
             IELTS<span style={{ color: 'var(--gold)' }}>Pro</span>
           </div>
-          <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 8, fontWeight: 500 }}>
-            AI-Powered IELTS Learning Platform
+           <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 8, fontWeight: 500 }}>
+             IELTS practice, feedback, and progress
           </p>
           {/* Decorative dots */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 12 }}>
@@ -108,8 +109,9 @@ export default function LoginPage() {
             Sign in to continue your IELTS journey
           </p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+           <form onSubmit={(event) => { event.preventDefault(); if (!loading) handle(); }} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <InputField
+               id="email"
               label="Email"
               type="email"
               value={email}
@@ -117,12 +119,12 @@ export default function LoginPage() {
               placeholder="your@email.com"
             />
             <InputField
+               id="password"
               label="Password"
               type="password"
               value={pass}
               onChange={(e) => setPass(e.target.value)}
               placeholder="••••••••"
-              onKeyDown={(e) => e.key === 'Enter' && !loading && handle()}
             />
 
             {err && (
@@ -141,7 +143,7 @@ export default function LoginPage() {
             )}
 
             <button
-              onClick={handle}
+               type="submit"
               disabled={loading}
               style={{
                 width: '100%', padding: '13px', borderRadius: 12,
@@ -159,7 +161,7 @@ export default function LoginPage() {
             >
               {loading ? 'Signing in…' : 'Sign In →'}
             </button>
-          </div>
+           </form>
 
           {/* Info box */}
           <div style={{
@@ -186,7 +188,7 @@ export default function LoginPage() {
           transition={{ delay: 0.4 }}
           style={{ textAlign: 'center', fontSize: 12, color: 'var(--muted2)', marginTop: 20 }}
         >
-          IELTSPro — AI-Powered Band Score Improvement
+           IELTSPro — measurable practice and teacher feedback
         </motion.p>
       </div>
     </div>

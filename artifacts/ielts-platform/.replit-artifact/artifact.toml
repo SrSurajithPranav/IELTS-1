@@ -1,7 +1,7 @@
 kind = "web"
 previewPath = "/"
 title = "IELTS Learning Platform"
-description = "A full IELTS practice platform for students and teachers with authentic reading, listening, writing, speaking, progress, feedback, and administration workflows."
+description = "A persistent IELTS learning platform with student practice, teacher review, progress tracking, vocabulary, mistakes, and honest availability states for external services."
 version = "1.0.0"
 id = "artifacts/ielts-platform"
 router = "path"
