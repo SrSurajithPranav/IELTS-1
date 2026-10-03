@@ -47,4 +47,4 @@ services:
     startCommand: npx serve dist -l $PORT
     envVars:
       - key: VITE_API_URL
-        value: https://ielts-backend.onrender.com
+        value: https://ielts-backend-941q.onrender.com
