@@ -14,17 +14,39 @@ def list_mistakes():
     return jsonify([r.to_dict() for r in rows])
 
 
+def _upsert(uid, item):
+    text = (item.get('error_text') or '').strip()[:500]
+    if not text:
+        return None
+    existing = Mistake.query.filter_by(user_id=uid, error_text=text).first()
+    if existing:
+        existing.frequency = (existing.frequency or 0) + 1
+        if item.get('suggestion'):
+            existing.suggestion = item['suggestion'][:500]
+        return existing
+    m = Mistake(user_id=uid, error_text=text, category=item.get('category', 'general'),
+                suggestion=(item.get('suggestion') or None))
+    db.session.add(m)
+    return m
+
+
 @mistakes_bp.route('/', methods=['POST'])
 @jwt_required()
 def add_mistake():
+    """Accepts one mistake {error_text, category, suggestion} or {items: [...]}."""
     uid = int(get_jwt_identity())
-    data = request.get_json() or {}
-    existing = Mistake.query.filter_by(user_id=uid, error_text=data.get('error_text','').strip()).first()
-    if existing:
-        existing.frequency = (existing.frequency or 0) + 1
-        db.session.commit()
-        return jsonify(existing.to_dict()), 200
-    m = Mistake(user_id=uid, error_text=data.get('error_text','').strip(), category=data.get('category','general'))
-    db.session.add(m)
+    data = request.get_json(silent=True) or {}
+    items = data['items'] if isinstance(data.get('items'), list) else [data]
+    saved = [m for m in (_upsert(uid, i if isinstance(i, dict) else {'error_text': str(i)}) for i in items[:50]) if m]
     db.session.commit()
-    return jsonify(m.to_dict()), 201
+    return jsonify([m.to_dict() for m in saved]), 201
+
+
+@mistakes_bp.route('/<int:mistake_id>', methods=['DELETE'])
+@jwt_required()
+def delete_mistake(mistake_id):
+    uid = int(get_jwt_identity())
+    m = Mistake.query.filter_by(id=mistake_id, user_id=uid).first_or_404()
+    db.session.delete(m)
+    db.session.commit()
+    return jsonify({'message': 'Cleared'})

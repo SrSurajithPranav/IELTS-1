@@ -156,3 +156,17 @@ def _update_streak(student_id):
         user.streak = 1
     user.last_active_date = today
     db.session.commit()
+
+
+@submissions_bp.route('/band-history', methods=['GET'])
+@jwt_required()
+def band_history():
+    """Teacher-given band scores over time (feeds the Progress chart)."""
+    uid = int(get_jwt_identity())
+    subs = (Submission.query.filter(Submission.student_id == uid, Submission.band_score.isnot(None))
+            .order_by(Submission.reviewed_at.asc(), Submission.submitted_at.asc()).all())
+    return jsonify([{
+        'date': (s.reviewed_at or s.submitted_at).strftime('%Y-%m-%d'),
+        'band': round(float(s.band_score), 1),
+        'task_type': s.task.type if s.task else 'practice',
+    } for s in subs])

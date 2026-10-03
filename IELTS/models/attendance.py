@@ -6,7 +6,7 @@ class Attendance(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     session_id = db.Column(db.Integer, db.ForeignKey('live_sessions.id'), nullable=False)
     student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    status = db.Column(db.String(20), default='present')  # present/absent
+    status = db.Column(db.String(20), default='present')  # present|absent|late
     joined_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):

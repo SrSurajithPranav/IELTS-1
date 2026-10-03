@@ -161,6 +161,7 @@ def create_app(config_name=None):
     from routes.bookings import bookings_bp
     from routes.listening import listening_bp
     from routes.reading import reading_bp
+    from routes.reports import reports_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(tasks_bp, url_prefix='/api/tasks')
@@ -184,6 +185,7 @@ def create_app(config_name=None):
     app.register_blueprint(bookings_bp)
     app.register_blueprint(listening_bp)
     app.register_blueprint(reading_bp)
+    app.register_blueprint(reports_bp)
 
     # Apply specific rate limit to login endpoint (10 per minute)
     try:

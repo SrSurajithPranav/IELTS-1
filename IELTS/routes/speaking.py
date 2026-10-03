@@ -6,34 +6,68 @@ from models.speaking_topic import SpeakingTopic
 speaking_bp = Blueprint('speaking', __name__, url_prefix='/api/speaking')
 
 
+def _ensure_seeded(uid):
+    from utils.default_topics import seed_default_topics
+    seed_default_topics(db, uid)
+
+
 @speaking_bp.route('/random', methods=['GET'])
 @jwt_required()
 def random_topic():
     import random
-    part = request.args.get('part')
+    _ensure_seeded(int(get_jwt_identity()))
     q = SpeakingTopic.query
+    part = request.args.get('part')
     if part:
         try:
-            p = int(part)
-            q = q.filter_by(part=p)
-        except:
+            q = q.filter_by(part=int(part))
+        except ValueError:
             pass
-    all_topics = q.all()
-    if not all_topics:
+    topics = q.all()
+    if not topics:
         return jsonify({'error': 'No topics found'}), 404
-    t = random.choice(all_topics)
-    return jsonify(t.to_dict())
+    return jsonify(random.choice(topics).to_dict())
+
+
+@speaking_bp.route('/topics', methods=['GET'])
+@jwt_required()
+def list_topics():
+    _ensure_seeded(int(get_jwt_identity()))
+    return jsonify([t.to_dict() for t in SpeakingTopic.query.order_by(SpeakingTopic.part, SpeakingTopic.id.desc()).all()])
 
 
 @speaking_bp.route('/', methods=['POST'])
+@speaking_bp.route('/topics', methods=['POST'])
 @jwt_required()
 def create_topic():
-    uid = int(get_jwt_identity())
-    data = request.get_json() or {}
-    topic = SpeakingTopic(part=int(data.get('part', 2)), question=data.get('question', ''), created_by=uid)
+    from utils.auth_helpers import current_user, is_staff
+    user = current_user()
+    if not is_staff(user):
+        return jsonify({'error': 'Admin only'}), 403
+    data = request.get_json(silent=True) or {}
+    question = (data.get('question') or '').strip()
+    try:
+        part = int(data.get('part', 2))
+    except (TypeError, ValueError):
+        part = 0
+    if part not in (1, 2, 3) or not question:
+        return jsonify({'error': 'part (1-3) and question are required'}), 400
+    topic = SpeakingTopic(part=part, question=question, created_by=user.id)
     db.session.add(topic)
     db.session.commit()
     return jsonify(topic.to_dict()), 201
+
+
+@speaking_bp.route('/topics/<int:topic_id>', methods=['DELETE'])
+@jwt_required()
+def delete_topic(topic_id):
+    from utils.auth_helpers import current_user, is_staff
+    if not is_staff(current_user()):
+        return jsonify({'error': 'Admin only'}), 403
+    t = SpeakingTopic.query.get_or_404(topic_id)
+    db.session.delete(t)
+    db.session.commit()
+    return jsonify({'message': 'Deleted'})
 
 
 # ============ SPEAKING FEATURES ============

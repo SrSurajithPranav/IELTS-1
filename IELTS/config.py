@@ -1,3 +1,9 @@
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # reads .env next to this file / cwd; real env vars still win
+except ImportError:  # python-dotenv is optional at runtime
+    pass
+
 import os
 from datetime import timedelta
 

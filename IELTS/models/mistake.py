@@ -7,6 +7,7 @@ class Mistake(db.Model):
     error_text = db.Column(db.String(500), nullable=False)
     category = db.Column(db.String(50), nullable=False)  # grammar, vocabulary, spelling
     frequency = db.Column(db.Integer, default=1)
+    suggestion = db.Column(db.String(500), nullable=True)
 
     def to_dict(self):
         return {
@@ -15,4 +16,5 @@ class Mistake(db.Model):
             'error_text': self.error_text,
             'category': self.category,
             'frequency': self.frequency,
+            'suggestion': self.suggestion,
         }

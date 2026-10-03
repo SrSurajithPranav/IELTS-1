@@ -68,7 +68,6 @@ export default function StudentDashboard() {
             <NotificationCenter />
           </React.Suspense>
         </div>
-      </motion.div>
         <p style={{ color: 'var(--muted)', fontSize: 14, marginTop: 4 }}>
           {pct === 100
             ? "🎉 All tasks done today — incredible work!"

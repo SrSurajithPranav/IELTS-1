@@ -29,3 +29,19 @@ def ensure_user_schema_columns(db):
     except Exception:
         db.session.rollback()
         raise
+
+
+def ensure_columns(db, table, column_sql):
+    """Add missing columns to an existing table (SQLite/PostgreSQL safe, idempotent)."""
+    try:
+        inspector = inspect(db.engine)
+        if table not in inspector.get_table_names():
+            return
+        existing = {c['name'] for c in inspector.get_columns(table)}
+        for name, ddl in column_sql.items():
+            if name not in existing:
+                db.session.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise

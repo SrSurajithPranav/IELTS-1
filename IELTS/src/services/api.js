@@ -24,6 +24,13 @@ function _resolveApiBase() {
 }
 
 export const API_BASE_URL = _resolveApiBase();
+
+/** Turn a stored media path (/uploads/x.webm) into a playable URL even when the API is on another origin. */
+export const mediaUrl = (u) => {
+  if (!u || /^https?:/i.test(u)) return u || '';
+  const origin = /^https?:/i.test(API_BASE_URL) ? API_BASE_URL.replace(/\/api$/, '') : '';
+  return `${origin}${u}`;
+};
 const API_TIMEOUT = 12000;
 
 // ── Core Fetch Utility ───────────────────────────────────
@@ -136,6 +143,13 @@ export const submissionsAPI = {
     if (audioBlob) formData.append('audio', audioBlob, 'recording.webm');
     return multipartCall('/submissions', formData);
   },
+  /** Mock-test / practice submission with optional audio, no task needed. */
+  submitPractice: (label, content, audioBlob) => {
+    const formData = new FormData();
+    formData.append('content', `${label}\n\n${content || ''}`.trim());
+    if (audioBlob) formData.append('audio', audioBlob, 'recording.webm');
+    return multipartCall('/submissions', formData);
+  },
   getStudentSubs: (studentId) => apiCall(`/submissions/student/${studentId}`),
   getPending: () => apiCall('/submissions/pending'),
   getAll: () => apiCall('/submissions'),
@@ -154,9 +168,10 @@ const appendSearchParams = (basePath, params = {}) => {
 
 // ── Feedback ──────────────────────────────────────────────
 export const feedbackAPI = {
-  create: (submissionId, text, audioFile) => {
+  create: (submissionId, text, audioFile, bandScore = null) => {
     const formData = new FormData();
     formData.append('feedback_text', text || '');
+    if (bandScore !== null && bandScore !== '') formData.append('band_score', String(bandScore));
     if (audioFile) formData.append('audio', audioFile, 'feedback.webm');
     return multipartCall(`/feedback/${submissionId}`, formData);
   },
@@ -232,8 +247,16 @@ export const studentsAPI = {
 
 // ── Batches ───────────────────────────────────────────────
 export const batchesAPI = {
-  getAll: () => apiCall('/batches'),
-  create: (data) => apiCall('/batches', { method: 'POST', body: JSON.stringify(data) }),
+  getAll: () => apiCall('/batches/'),
+  get: (id) => apiCall(`/batches/${id}`),
+  create: (data) => apiCall('/batches/', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => apiCall(`/batches/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  remove: (id) => apiCall(`/batches/${id}`, { method: 'DELETE' }),
+  addMember: (id, studentId) =>
+    apiCall(`/batches/${id}/members`, { method: 'POST', body: JSON.stringify({ student_id: studentId }) }),
+  removeMember: (id, studentId) => apiCall(`/batches/${id}/members/${studentId}`, { method: 'DELETE' }),
+  assignPlan: (id, planId) =>
+    apiCall(`/batches/${id}/assign-plan`, { method: 'POST', body: JSON.stringify({ plan_id: planId }) }),
 };
 
 // ── Sessions ──────────────────────────────────────────────
@@ -326,6 +349,7 @@ export const leaderboardAPI = {
 export const announcementsAPI = {
   getAll: () => apiCall('/announcements/'),
   create: (data) => apiCall('/announcements/', { method: 'POST', body: JSON.stringify(data) }),
+  remove: (id) => apiCall(`/announcements/${id}`, { method: 'DELETE' }),
 };
 
 // ── Vocabulary ────────────────────────────────────────────
@@ -341,19 +365,50 @@ export const vocabularyAPI = {
 export const mistakesAPI = {
   get: () => apiCall('/mistakes/'),
   log: (items) => apiCall('/mistakes/', { method: 'POST', body: JSON.stringify({ items }) }),
+  clear: (id) => apiCall(`/mistakes/${id}`, { method: 'DELETE' }),
 };
 
 // ── Bookings ──────────────────────────────────────────────
 export const bookingsAPI = {
   getSlots: () => apiCall('/bookings/slots'),
-  book: (slotId) => apiCall('/bookings/', { method: 'POST', body: JSON.stringify({ slot_id: slotId }) }),
+  book: (slotId) => apiCall(`/bookings/book/${slotId}`, { method: 'POST' }),
+  cancel: (slotId) => apiCall(`/bookings/${slotId}`, { method: 'DELETE' }),
+  createSlot: (data) => apiCall('/bookings/slots', { method: 'POST', body: JSON.stringify(data) }),
+  generate: (data) => apiCall('/bookings/slots/generate', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // ── Attendance ────────────────────────────────────────────
 export const attendanceAPI = {
-  get: () => apiCall('/attendance/'),
+  me: () => apiCall('/attendance/me'),
+  forSession: (sessionId) => apiCall(`/attendance/session/${sessionId}`),
+  mark: (sessionId, studentId, status) =>
+    apiCall('/attendance/', { method: 'POST', body: JSON.stringify({ session_id: sessionId, student_id: studentId, status }) }),
   checkIn: (sessionId) =>
     apiCall('/attendance/', { method: 'POST', body: JSON.stringify({ session_id: sessionId }) }),
+};
+
+// ── Speaking topic bank ───────────────────────────────────
+export const speakingTopicsAPI = {
+  random: (part) => apiCall(`/speaking/random${part ? `?part=${part}` : ''}`),
+  list: () => apiCall('/speaking/topics'),
+  create: (data) => apiCall('/speaking/topics', { method: 'POST', body: JSON.stringify(data) }),
+  remove: (id) => apiCall(`/speaking/topics/${id}`, { method: 'DELETE' }),
+};
+
+// ── Reports / analytics / band history ────────────────────
+export const reportsAPI = {
+  me: () => apiCall('/reports/me'),
+  student: (id) => apiCall(`/reports/student/${id}`),
+  analytics: () => apiCall('/reports/analytics'),
+  bandHistory: () => apiCall('/submissions/band-history'),
+};
+
+// ── Practice (server-scored reading) ──────────────────────
+export const practiceAPI = {
+  getQuestions: (skill = 'reading', limit = 10) =>
+    apiCall(`/practice/questions?skill=${encodeURIComponent(skill)}&limit=${Number(limit)}`),
+  getAttempts: () => apiCall('/practice/attempts'),
+  submitAttempt: (data) => apiCall('/practice/attempts', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // ── Submission review (teacher/admin) ─────────────────────

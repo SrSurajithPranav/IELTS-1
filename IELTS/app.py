@@ -21,7 +21,7 @@ from models.notification import Notification
 from models.session import LiveSession, SessionRecording
 from models.quiz import Quiz, QuizQuestion, QuizAttempt
 from models.resource import Resource
-from utils.schema import ensure_user_schema_columns
+from utils.schema import ensure_user_schema_columns, ensure_columns
 
 def create_app(config_name=None):
     """Application factory."""
@@ -181,6 +181,12 @@ def create_app(config_name=None):
     app.register_blueprint(bookings_bp)
     app.register_blueprint(listening_bp)
     app.register_blueprint(reading_bp)
+    from routes.reports import reports_bp
+    app.register_blueprint(reports_bp)
+    from routes.practice import practice_bp
+    app.register_blueprint(practice_bp)
+    import models.practice_attempt  # noqa: F401
+    import models.mistake, models.speaking_topic, models.attendance, models.booking_slot, models.announcement  # noqa: F401
 
     # Apply specific rate limit to login endpoint (10 per minute)
     try:
@@ -235,6 +241,12 @@ def create_app(config_name=None):
                 "password are URL-encoded, and that the host/user pair matches the "
                 "copy-pasted value from Supabase Dashboard."
             ) from exc
+
+        try:
+            ensure_columns(db, 'batches', {'level': "VARCHAR(20) DEFAULT 'intermediate'", 'max_students': 'INTEGER DEFAULT 10'})
+            ensure_columns(db, 'mistakes', {'suggestion': 'VARCHAR(500)'})
+        except Exception as exc:
+            raise RuntimeError('Database schema update failed for batches/mistakes.') from exc
 
         try:
             ensure_user_schema_columns(db)

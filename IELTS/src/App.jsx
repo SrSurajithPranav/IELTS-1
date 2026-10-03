@@ -21,6 +21,8 @@ import {
   visibleStudents,
   loadMistakeMemory,
   pushMistakeMemory,
+  reportsAPI,
+  mediaUrl,
 } from "./services/api";
 import ThemeToggle from "./components/ThemeToggle";
 import DotMenu from "./components/ui/DotMenu";
@@ -28,6 +30,15 @@ import AnnouncementBanner from "./components/AnnouncementBanner";
 const NotificationCenter = React.lazy(() => import('./components/NotificationCenter'));
 import VocabularyPage from "./pages/VocabularyPage";
 import StudentGamesPage from "./pages/student/Games";
+import MockTestPage from "./pages/student/MockTest";
+import PracticePage from "./pages/student/Practice";
+import {
+  SpeakingTopicBankPage, AdminTopicBankPage, MistakeLogPage, StudentBookingsPage, AdminBookingsPage,
+  AdminAttendancePage, AdminBatchesPage, AdminAnnouncementsPage, CalendarPage, ProfilePage, ReportPage,
+  AdminAnalyticsPage,
+} from "./pages/FeaturePages";
+import LandingPage from "./pages/Landing";
+import RegisterPage from "./pages/Register";
 
 // ─────────────────────────────────────────────
 // GLOBAL STYLES
@@ -56,6 +67,20 @@ const GlobalStyles = () => (
       --sidebar-w:  240px;
     }
 
+    .menu-btn { display: none; }
+    @media (max-width: 860px) {
+      .app-sidebar { transform: translateX(-102%); transition: transform .25s ease; box-shadow: 0 0 40px rgba(0,0,0,.25); }
+      .app-sidebar.open { transform: none; }
+      .app-main { margin-left: 0 !important; padding: 68px 14px 28px !important; }
+      .menu-btn { display: grid; place-items: center; position: fixed; top: 12px; left: 12px; z-index: 120;
+        width: 42px; height: 42px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 20px; cursor: pointer; }
+      .app-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 90; }
+    }
+    @media print {
+      .no-print, .app-sidebar, .menu-btn, .app-backdrop { display: none !important; }
+      .app-main { margin-left: 0 !important; padding: 0 !important; }
+      body { background: #fff !important; }
+    }
     html, body, #root { height: 100%; font-family: 'Manrope', sans-serif; background: var(--bg); color: var(--text); }
 
     ::-webkit-scrollbar { width: 5px; }
@@ -229,35 +254,24 @@ const ProgressBar = ({ pct, color = "var(--accent)", height = 6 }) => (
   </div>
 );
 
-const BandHistoryChart = ({ studentId }) => {
+const BandHistoryChart = () => {
   const [points, setPoints] = useState([]);
   useEffect(() => {
-    (async () => {
-      try {
-        const subs = await submissionsAPI.getStudentSubs(studentId);
-        const bands = (subs || []).map(s => ({ date: s.created_at || s.date, band: s.band_estimate || s.band_estimate || null })).filter(x => x.band != null);
-        // take last 12
-        const last = bands.slice(-12);
-        setPoints(last);
-      } catch (e) { setPoints([]); }
-    })();
-  }, [studentId]);
+    reportsAPI.bandHistory().then((rows) => setPoints(Array.isArray(rows) ? rows.slice(-12) : [])).catch(() => setPoints([]));
+  }, []);
 
-  if (!points || points.length === 0) return <div style={{ fontSize: 13, color: "var(--muted)" }}>No band history yet</div>;
-  const maxBand = Math.max(...points.map(p => Number(p.band)));
-  const minBand = Math.min(...points.map(p => Number(p.band)));
-  const w = 420, h = 120, pad = 12;
+  if (points.length === 0) return <div style={{ fontSize: 13, color: "var(--muted)" }}>No band history yet — it appears after your teacher scores a submission.</div>;
+  const w = 420, h = 130, pad = 16;
   const dx = (w - pad * 2) / Math.max(1, points.length - 1);
-  const mapY = (v) => {
-    if (maxBand === minBand) return h/2;
-    return pad + (1 - (v - minBand) / (maxBand - minBand)) * (h - pad * 2);
-  };
-  const path = points.map((p, i) => `${i===0?'M':'L'} ${pad + i*dx} ${mapY(p.band)}`).join(' ');
+  const mapY = (v) => pad + (1 - Number(v) / 9) * (h - pad * 2);   // fixed 0–9 band scale
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${pad + i * dx} ${mapY(p.band)}`).join(" ");
   return (
-    <svg width={w} height={h} style={{ background: 'transparent' }}>
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", maxWidth: w, height: "auto" }}>
+      {[3, 6, 9].map((g) => <g key={g}><line x1={pad} x2={w - pad} y1={mapY(g)} y2={mapY(g)} stroke="var(--border)" strokeDasharray="3 3" /><text x={0} y={mapY(g) + 3} fontSize="9" fill="var(--muted)">{g}</text></g>)}
       <path d={path} fill="none" stroke="var(--accent)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      {points.map((p,i) => (
-        <circle key={i} cx={pad + i*dx} cy={mapY(p.band)} r={4} fill="var(--card)" stroke="var(--accent)" />
+      {points.map((p, i) => (
+        <g key={i}><circle cx={pad + i * dx} cy={mapY(p.band)} r={4} fill="var(--card)" stroke="var(--accent)" />
+          <title>{`${p.date} · ${p.task_type} · band ${p.band}`}</title></g>
       ))}
     </svg>
   );
@@ -298,7 +312,7 @@ const Btn = ({ children, onClick, variant = "primary", size = "md", disabled = f
 // ─────────────────────────────────────────────
 // SIDEBAR
 // ─────────────────────────────────────────────
-const Sidebar = ({ page, setPage, user, onLogout }) => {
+const Sidebar = ({ page, setPage, user, onLogout, open }) => {
   const studentNav = [
     { id: "dashboard",    icon: "⊞",  label: "Dashboard" },
     { id: "vocabulary",   icon: "📓", label: "Vocabulary" },
@@ -315,6 +329,13 @@ const Sidebar = ({ page, setPage, user, onLogout }) => {
     { id: "liveclass",    icon: "🎥", label: "Live Class" },
     { id: "quizzes",      icon: "🧩", label: "Quizzes" },
     { id: "resources",    icon: "📚", label: "Resources" },
+    { id: "practice",     icon: "📖", label: "Reading Practice" },
+    { id: "calendar",     icon: "🗓️", label: "Calendar" },
+    { id: "bookings",     icon: "📅", label: "1-on-1 Booking" },
+    { id: "topic-bank",   icon: "🎙",  label: "Topic Bank" },
+    { id: "mistake-log",  icon: "🏷",  label: "Mistake Log" },
+    { id: "report",       icon: "📄", label: "My Report" },
+    { id: "profile",      icon: "👤", label: "Profile" },
   ];
   const adminNav = [
     { id: "admin-home",     icon: "⊞",  label: "Overview" },
@@ -325,11 +346,20 @@ const Sidebar = ({ page, setPage, user, onLogout }) => {
     { id: "admin-sessions",    icon: "🎙", label: "Sessions" },
     { id: "admin-resources",   icon: "📚", label: "Resources" },
     { id: "admin-quizzes",     icon: "🧩", label: "Quiz Builder" },
+    { id: "admin-batches",     icon: "👥", label: "Batches" },
+    { id: "admin-bookings",    icon: "📅", label: "Solo Slots" },
+    { id: "admin-attendance",  icon: "✅", label: "Attendance" },
+    { id: "admin-topics",      icon: "🎙",  label: "Topic Bank" },
+    { id: "admin-announce",    icon: "📢", label: "Announcements" },
+    { id: "admin-analytics",   icon: "📈", label: "Analytics" },
+    { id: "admin-audits",      icon: "🧾", label: "Review Audits" },
+    { id: "admin-job-tokens",  icon: "🔑", label: "Job Tokens" },
+    { id: "profile",           icon: "👤", label: "Profile" },
   ];
   const nav = user?.role === "admin" ? adminNav : studentNav;
 
   return (
-    <aside style={{
+    <aside className={`app-sidebar no-print${open ? " open" : ""}`} style={{
       width: "var(--sidebar-w)", background: "var(--bg2)", borderRight: "1px solid var(--border)",
       height: "100vh", position: "fixed", left: 0, top: 0, display: "flex", flexDirection: "column",
       padding: "0 0 16px", zIndex: 100
@@ -400,7 +430,7 @@ const Sidebar = ({ page, setPage, user, onLogout }) => {
 // ─────────────────────────────────────────────
 // LOGIN PAGE
 // ─────────────────────────────────────────────
-const LoginPage = ({ onLogin }) => {
+const LoginPage = ({ onLogin, onNavigate }) => {
   const [email, setEmail] = useState("");
   const [pass, setPass]   = useState("");
   const [err, setErr]     = useState("");
@@ -442,10 +472,24 @@ const LoginPage = ({ onLogin }) => {
       <GlobalStyles />
       <div className="fade-up" style={{ width: "100%", maxWidth: 420, padding: "0 20px" }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div className="playfair" style={{ fontSize: 36, fontWeight: 700, color: "var(--accent)" }}>
+          <button
+            className="playfair"
+            onClick={() => {
+              onNavigate?.("/");
+            }}
+            style={{ fontSize: 36, fontWeight: 700, color: "var(--accent)" }}
+          >
             IELTS<span style={{ color: "var(--gold)" }}>Pro</span>
-          </div>
+          </button>
           <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 6 }}>Smart Training Platform</p>
+          <button
+            onClick={() => {
+              onNavigate?.("/");
+            }}
+            style={{ color: "var(--muted)", fontSize: 11, marginTop: 14 }}
+          >
+            ← Back to home
+          </button>
         </div>
 
         <Card>
@@ -489,7 +533,7 @@ const LoginPage = ({ onLogin }) => {
 const TaskCard = ({ task, onSubmit }) => {
   const [expanded, setExpanded] = useState(false);
   const [text, setText] = useState("");
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState(["submitted", "reviewed"].includes(task.status));
   const [recording, setRecording] = useState(false);
   const [recTime, setRecTime] = useState(0);
   const timerRef = useRef(null);
@@ -615,10 +659,24 @@ const TaskCard = ({ task, onSubmit }) => {
         </div>
       )}
 
+      {task.status === "submitted" && (
+        <div style={{ padding: "10px 20px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--muted)" }}>
+          ⏳ Submitted — waiting for your teacher's review.
+        </div>
+      )}
+
       {task.status === "reviewed" && (
-        <div style={{ padding: "12px 20px", background: "rgba(34,197,94,.06)", borderTop: "1px solid rgba(34,197,94,.15)" }}>
-          <div style={{ fontSize: 12, color: "var(--success)", fontWeight: 600, marginBottom: 4 }}>📋 Teacher Feedback</div>
-          <div style={{ fontSize: 13, color: "var(--text)" }}>Great work! Focus on improving your vocabulary range and use more complex sentence structures.</div>
+        <div style={{ padding: "12px 20px", background: "rgba(47,133,90,.07)", borderTop: "1px solid rgba(47,133,90,.2)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: "var(--success)", fontWeight: 600 }}>📋 Teacher feedback</div>
+            {task.submission?.band_score != null && <Badge label={`Band ${task.submission.band_score}`} color="gold" />}
+          </div>
+          <div style={{ fontSize: 13, color: "var(--text)", whiteSpace: "pre-wrap" }}>
+            {task.submission?.feedback_text || "Reviewed — no written comments."}
+          </div>
+          {task.submission?.feedback_audio_url && (
+            <audio controls preload="none" src={mediaUrl(task.submission.feedback_audio_url)} style={{ width: "100%", marginTop: 10 }} />
+          )}
         </div>
       )}
     </Card>
@@ -1488,7 +1546,7 @@ const ProgressPage = ({ user }) => {
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Band Score History</div>
-        <BandHistoryChart studentId={user.id} />
+        <BandHistoryChart />
       </Card>
 
       {/* Weak Areas */}
@@ -1705,156 +1763,6 @@ const GamesArenaPage = () => {
 // ─────────────────────────────────────────────
 // MOCK TEST PAGE
 // ─────────────────────────────────────────────
-const MOCK_TEST_BANK = {
-  writing: {
-    title: "Writing Task 2: Public Space Priority",
-    duration: 40,
-    wordTarget: 250,
-    prompt: "Some people argue that city budgets should prioritize public parks and libraries rather than sports arenas. Discuss both views and give your opinion.",
-    checklist: [
-      "State your position clearly in the introduction.",
-      "Use one paragraph per main argument.",
-      "Support each argument with a practical example.",
-      "Write a short conclusion that reinforces your view."
-    ]
-  },
-  reading: {
-    title: "Reading Passage: The Night Shift Effect",
-    duration: 20,
-    prompt: "A workplace study tracked 600 hospital employees over eight years. Researchers found that workers on rotating shifts reported lower sleep quality and higher stress. However, teams with predictable rosters and recovery days showed better concentration scores. The report recommends fixed schedules, mandatory quiet rooms, and hydration reminders during overnight hours.",
-    checklist: [
-      "TRUE/FALSE: The study lasted fewer than five years.",
-      "TRUE/FALSE: Predictable rosters improved concentration.",
-      "Choose TWO recommendations from the passage.",
-      "Write a one-sentence summary in your own words."
-    ]
-  },
-  listening: {
-    title: "Listening Notes: Campus Orientation",
-    duration: 15,
-    prompt: "You hear a student advisor explain orientation week. New students must collect ID cards before Wednesday, register for workshops online, and join one study group session. The library tour starts at 11:30, while language support appointments open on Friday.",
-    checklist: [
-      "What must be collected before Wednesday?",
-      "How should workshops be registered?",
-      "At what time does the library tour begin?",
-      "On which day do language appointments open?"
-    ]
-  },
-  speaking: {
-    title: "Speaking Part 2: A Skill You Learned",
-    duration: 10,
-    prompt: "Describe a skill you learned recently. You should say when you started learning it, what challenges you faced, how you practiced, and why it is useful for your future.",
-    checklist: [
-      "Speak for 1 to 2 minutes.",
-      "Use specific examples instead of general statements.",
-      "Include one difficulty and how you solved it.",
-      "Finish with a future goal."
-    ]
-  }
-};
-
-const MockTestPage = () => {
-  const [activeSkill, setActiveSkill] = useState("writing");
-  const skill = MOCK_TEST_BANK[activeSkill];
-  const [timeLeft, setTimeLeft] = useState(skill.duration * 60);
-  const [testText, setTestText] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-
-  useEffect(() => {
-    setTimeLeft(skill.duration * 60);
-    setSubmitted(false);
-    setTestText("");
-  }, [activeSkill, skill.duration]);
-
-  useEffect(() => {
-    if (submitted) return;
-    const t = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(t);
-          setSubmitted(true);
-          alert("Time's up!");
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(t);
-  }, [activeSkill, submitted]);
-
-  const format = (s) => `${Math.floor(s/60)}:${String(s % 60).padStart(2, "0")}`;
-  const words = testText.split(/\s+/).filter(Boolean).length;
-  const requiresEssay = activeSkill === "writing";
-  const minWords = requiresEssay ? skill.wordTarget : 40;
-  const readyToSubmit = words >= minWords;
-
-  return (
-    <div>
-      <div className="fade-up playfair" style={{ fontSize: 22, fontWeight: 700, marginBottom: 20 }}>
-        Mock Test Studio
-      </div>
-
-      <div className="fade-up-2" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        {Object.keys(MOCK_TEST_BANK).map((k) => (
-          <Btn
-            key={k}
-            size="sm"
-            variant={activeSkill === k ? "primary" : "outline"}
-            onClick={() => setActiveSkill(k)}
-          >
-            {k[0].toUpperCase() + k.slice(1)}
-          </Btn>
-        ))}
-      </div>
-
-      <Card className="fade-up-3" style={{ marginBottom: 20, background: "linear-gradient(135deg,rgba(20,108,114,.12),rgba(214,148,41,.10))", border: "1px solid rgba(20,108,114,.2)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>{skill.title}</div>
-            <div className="playfair" style={{ fontSize: 36, fontWeight: 700, color: timeLeft < 300 ? "var(--danger)" : "var(--warn)", fontVariantNumeric: "tabular-nums" }}>
-              {format(timeLeft)}
-            </div>
-          </div>
-          <ProgressRing pct={Math.round((timeLeft / (skill.duration * 60)) * 100)} size={100} color={timeLeft < 120 ? "var(--danger)" : "var(--accent)"} />
-        </div>
-      </Card>
-
-      <Card className="fade-up-4">
-        <div style={{ fontWeight: 700, marginBottom: 14 }}>{skill.title}</div>
-        <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>
-          {skill.prompt}
-        </p>
-        <div style={{ marginBottom: 14, padding: 12, borderRadius: 10, background: "rgba(20,108,114,.08)", border: "1px solid rgba(20,108,114,.2)" }}>
-          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>Checklist</div>
-          {skill.checklist.map((item, idx) => (
-            <div key={idx} style={{ fontSize: 12, color: "var(--text)", marginBottom: 5 }}>• {item}</div>
-          ))}
-        </div>
-        <textarea
-          value={testText}
-          onChange={e => setTestText(e.target.value)}
-          disabled={submitted}
-          placeholder="Write your answer here…"
-          rows={10}
-          style={{
-            width: "100%", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10,
-            padding: 14, color: "var(--text)", fontSize: 13, resize: "vertical", outline: "none"
-          }}
-        />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            {words} words {readyToSubmit ? "✓" : `(${Math.max(minWords - words, 0)} more)`}
-          </span>
-          <Btn onClick={() => setSubmitted(true)} disabled={submitted || !readyToSubmit}>
-            {submitted ? "✓ Submitted" : "Submit Test"}
-          </Btn>
-        </div>
-      </Card>
-    </div>
-  );
-};
-
 // ─────────────────────────────────────────────
 // LEADERBOARD PAGE
 // ─────────────────────────────────────────────
@@ -2696,7 +2604,9 @@ const AdminReview = () => {
   const [selected, setSelected] = useState(null);
   const [feedback, setFeedback] = useState("");
   const [feedbackFile, setFeedbackFile] = useState(null);
+  const [band, setBand] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState("");
 
   const [pending, setPending] = useState([]);
 
@@ -2708,12 +2618,16 @@ const AdminReview = () => {
     if (!selected) return;
     setSaving(true);
     try {
-      await feedbackAPI.create(selected.id, feedback, feedbackFile);
+      setSaveErr("");
+      await feedbackAPI.create(selected.id, feedback, feedbackFile, band);
       const refreshed = await submissionsAPI.getPending();
       setPending(refreshed || []);
       setSelected(null);
       setFeedback("");
       setFeedbackFile(null);
+      setBand("");
+    } catch (e) {
+      setSaveErr(e.message || "Could not save feedback");
     } finally {
       setSaving(false);
     }
@@ -2728,7 +2642,7 @@ const AdminReview = () => {
         <div>
           {pending.map((s) => (
             <Card key={s.id} className="fade-up-3" style={{ marginBottom: 14, cursor: "pointer", border: selected?.id === s.id ? "1px solid var(--accent)" : "1px solid var(--border)" }}
-              onClick={() => { setSelected(s); setFeedback(s.feedback_text || ""); setFeedbackFile(null); }}>
+              onClick={() => { setSelected(s); setFeedback(s.feedback_text || ""); setFeedbackFile(null); setBand(""); setSaveErr(""); }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                 <div style={{ fontWeight: 600 }}>Task #{s.task_id}</div>
                 <StatusBadge status={s.status} />
@@ -2753,7 +2667,7 @@ const AdminReview = () => {
             </div>
             {(selected.task?.type || selected.type) === "speaking" && (
               <div style={{ marginBottom: 14 }}>
-                <Btn size="sm" variant="outline" onClick={() => selected.file_url && window.open(selected.file_url, "_blank", "noopener,noreferrer")} disabled={!selected.file_url}>▶ Play Student Recording</Btn>
+                <Btn size="sm" variant="outline" onClick={() => selected.file_url && window.open(mediaUrl(selected.file_url), "_blank", "noopener,noreferrer")} disabled={!selected.file_url}>▶ Play Student Recording</Btn>
               </div>
             )}
             <div style={{ marginBottom: 14 }}>
@@ -2769,6 +2683,12 @@ const AdminReview = () => {
               <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 6 }}>Audio Feedback</label>
               <input type="file" accept="audio/*" style={{ fontSize: 13, color: "var(--muted)" }} onChange={(e) => setFeedbackFile(e.target.files?.[0] || null)} />
             </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 6 }}>Band score (0–9, optional)</label>
+              <input type="number" min="0" max="9" step="0.5" value={band} onChange={(e) => setBand(e.target.value)} placeholder="e.g. 6.5"
+                style={{ width: 120, background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "9px 12px", color: "var(--text)", fontSize: 13, outline: "none" }} />
+            </div>
+            {saveErr && <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 10 }}>{saveErr}</div>}
             <div style={{ display: "flex", gap: 10 }}>
               <Btn onClick={saveFeedback} disabled={saving}>
                 {saving ? "Saving…" : "Save Feedback"}
@@ -2997,6 +2917,15 @@ const AdminTasks = () => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [page, setPage] = useState("dashboard");
+  const [navOpen, setNavOpen] = useState(false);
+  const [pageKey, setPageKey] = useState(0);
+  const [publicPath, setPublicPath] = useState(() => window.location.pathname);
+
+  useEffect(() => {
+    const handlePopState = () => setPublicPath(window.location.pathname);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   // Check for existing token on app load
   useEffect(() => {
@@ -3016,6 +2945,7 @@ export default function App() {
               writing_band: usr.writing_band || null,
               speaking_band: usr.speaking_band || null,
               weak_areas: usr.weak_areas || '',
+              zoom_link: usr.zoom_link || '',
             });
             setPage(usr.role === "admin" ? "admin-home" : "dashboard");
           }
@@ -3037,7 +2967,24 @@ export default function App() {
     setPage("dashboard"); 
   };
 
-  if (!user) return <><GlobalStyles /><LoginPage onLogin={handleLogin} /></>;
+  if (!user) {
+    const navigatePublic = (path) => {
+      window.history.pushState({}, "", path);
+      setPublicPath(path);
+    };
+    return (
+      <>
+        <GlobalStyles />
+        {publicPath === "/sign-in" ? (
+          <LoginPage onLogin={handleLogin} onNavigate={navigatePublic} />
+        ) : publicPath === "/sign-up" ? (
+          <RegisterPage onNavigate={navigatePublic} />
+        ) : (
+          <LandingPage onNavigate={navigatePublic} />
+        )}
+      </>
+    );
+  }
 
   const studentPages = {
     dashboard: <StudentDashboard user={user} />,
@@ -3050,6 +2997,13 @@ export default function App() {
     debate:    <DebateModePage />,
     progress:  <ProgressPage user={user} />,
     mocktest:  <MockTestPage />,
+    practice:  <PracticePage skill="reading" />,
+    calendar:  <CalendarPage />,
+    bookings:  <StudentBookingsPage />,
+    'topic-bank':  <SpeakingTopicBankPage />,
+    'mistake-log': <MistakeLogPage />,
+    report:    <ReportPage />,
+    profile:   <ProfilePage user={user} onUpdated={(patch) => setUser((u) => ({ ...u, ...patch }))} />,
     games:     <StudentGamesPage />,
     leaderboard: <LeaderboardPage />,
     liveclass: <LiveSessionsPage user={user} />,
@@ -3067,6 +3021,13 @@ export default function App() {
     "admin-sessions":      <AdminSessionsMgr />,
     "admin-resources":     <AdminResourcesMgr />,
     "admin-quizzes":       <AdminQuizBuilder />,
+    "admin-batches":       <AdminBatchesPage />,
+    "admin-bookings":      <AdminBookingsPage />,
+    "admin-attendance":    <AdminAttendancePage />,
+    "admin-topics":        <AdminTopicBankPage />,
+    "admin-announce":      <AdminAnnouncementsPage />,
+    "admin-analytics":     <AdminAnalyticsPage />,
+    profile:               <ProfilePage user={user} onUpdated={(patch) => setUser((u) => ({ ...u, ...patch }))} />,
   };
   const pages = user.role === "admin" ? adminPages : studentPages;
   const content = pages[page] || <div style={{ color: "var(--muted)" }}>Page not found</div>;
@@ -3087,10 +3048,22 @@ export default function App() {
           </React.Suspense>
         </div>
         <div style={{ display: "flex", minHeight: "100vh" }}>
-          <Sidebar page={page} setPage={setPage} user={user} onLogout={handleLogout} />
-          <main style={{ marginLeft: "var(--sidebar-w)", flex: 1, padding: "32px 32px 32px", minHeight: "100vh", overflowY: "auto" }}>
+          <button className="menu-btn no-print" aria-label="Menu" onClick={() => setNavOpen((o) => !o)}>{navOpen ? "✕" : "☰"}</button>
+          {navOpen && <div className="app-backdrop" onClick={() => setNavOpen(false)} />}
+          <Sidebar page={page} setPage={(id) => { setPage(id); setNavOpen(false); }} user={user} onLogout={handleLogout} open={navOpen} />
+          <main className="app-main" style={{ marginLeft: "var(--sidebar-w)", flex: 1, padding: "32px 32px 32px", minHeight: "100vh", overflowY: "auto" }}>
             <div style={{ maxWidth: 860 }}>
-              {content}
+              <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                <DotMenu items={[
+                  { icon: "↻", label: "Refresh this page", action: () => setPageKey((k) => k + 1) },
+                  ...(user.role === "admin"
+                    ? [{ icon: "📈", label: "Analytics", action: () => setPage("admin-analytics") }, { icon: "🔍", label: "Review submissions", action: () => setPage("admin-review") }]
+                    : [{ icon: "✓", label: "Today's tasks", action: () => setPage("tasks") }, { icon: "📄", label: "My report", action: () => setPage("report") }]),
+                  { icon: "👤", label: "Profile", action: () => setPage("profile") },
+                  { icon: "⎋", label: "Log out", action: handleLogout, danger: true },
+                ]} />
+              </div>
+              <React.Fragment key={`${page}-${pageKey}`}>{content}</React.Fragment>
             </div>
           </main>
         </div>

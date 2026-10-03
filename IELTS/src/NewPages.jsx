@@ -427,20 +427,20 @@ export const VocabFlashcardDeck = ({ userId }) => {
   }, []);
 
   const mark = async (correct) => {
-    const card = cards[idx];
-    if (!card) return;
-    await apiFetch(`/vocabulary/${card.id}/review`, { method: 'POST', body: JSON.stringify({ correct }) });
+    const current = cards[idx];
+    if (!current) return;
+    await apiFetch(`/vocabulary/${current.id}/review`, { method: 'POST', body: JSON.stringify({ correct }) });
     setIdx(i => (i + 1) % Math.max(1, cards.length));
   };
 
   if (loading) return <div style={card}>Loading cards…</div>;
   if (!cards.length) return <div style={card}>No cards yet.</div>;
-  const card = cards[idx];
+  const current = cards[idx];
   return (
     <div style={card}>
-      <div style={{ fontWeight: 700, fontSize: 16 }}>{card.word}</div>
-      <div style={{ color: 'var(--muted)', marginTop: 8 }}>{card.definition}</div>
-      {card.example && <div style={{ marginTop: 8, fontStyle: 'italic' }}>“{card.example}”</div>}
+      <div style={{ fontWeight: 700, fontSize: 16 }}>{current.word}</div>
+      <div style={{ color: 'var(--muted)', marginTop: 8 }}>{current.definition}</div>
+      {current.example && <div style={{ marginTop: 8, fontStyle: 'italic' }}>“{current.example}”</div>}
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         <button onClick={() => mark(true)} style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--success)' }}>I knew this</button>
         <button onClick={() => mark(false)} style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--bg3)' }}>Review again</button>
