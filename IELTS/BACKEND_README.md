@@ -89,6 +89,32 @@ python app.py
 
 Server runs at `http://localhost:5000`
 
+### Interactive API documentation
+
+Development enables Swagger UI automatically:
+
+- Swagger UI: `http://localhost:5000/apidocs/`
+- OpenAPI JSON: `http://localhost:5000/apispec.json`
+
+The UI includes the documented authentication, admin, teacher, student,
+practice, quiz, media, and reporting operations. To expose it in a deployed
+environment, set `ENABLE_SWAGGER=true` and restart the backend. Use the
+**Authorize** button with `Bearer <access-token>` after logging in.
+
+### Seed local role accounts
+
+Create two admins, two teachers, and four students (students are assigned
+round-robin to the teachers) with local-only passwords:
+
+```bash
+SEED_ADMIN_PASSWORD='change-me' \
+SEED_TEACHER_PASSWORD='change-me' \
+SEED_STUDENT_PASSWORD='change-me' \
+python scripts/seed_users.py
+```
+
+The script is idempotent and does not overwrite existing passwords.
+
 ## API Endpoints
 
 ### Authentication

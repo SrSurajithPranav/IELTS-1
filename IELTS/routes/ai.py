@@ -324,10 +324,10 @@ def study_plan():
             - Bearer: []
         parameters:
             - name: student_id
-                in: query
-                type: integer
-                required: false
-                description: Admin-only override for specific student.
+              in: query
+              type: integer
+              required: false
+              description: Admin-only override for specific student.
         responses:
             200:
                 description: Personalized study plan
@@ -395,16 +395,16 @@ def next_drill():
             - Bearer: []
         parameters:
             - name: body
-                in: body
-                required: false
-                schema:
-                    properties:
-                        preferred_skill:
-                            type: string
-                        minutes:
-                            type: integer
-                        student_id:
-                            type: integer
+              in: body
+              required: false
+              schema:
+                properties:
+                  preferred_skill:
+                    type: string
+                  minutes:
+                    type: integer
+                  student_id:
+                    type: integer
         responses:
             200:
                 description: Next drill recommendation

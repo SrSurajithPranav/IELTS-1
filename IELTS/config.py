@@ -43,6 +43,7 @@ class Config:
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     CORS_ALLOWED_ORIGINS = configured_origins()
     SEED_DEMO_DATA = os.getenv('SEED_DEMO_DATA', 'false').lower() == 'true'
+    ENABLE_SWAGGER = os.getenv('ENABLE_SWAGGER', 'false').lower() == 'true'
     
     # Cloudinary
     CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME')
@@ -66,6 +67,7 @@ class DevelopmentConfig(Config):
     """Development configuration."""
     DEBUG = True
     REQUIRE_LOGIN_APPROVAL = False
+    ENABLE_SWAGGER = True
 
 class ProductionConfig(Config):
     """Production configuration — requires DATABASE_URL env var (PostgreSQL)."""
@@ -97,6 +99,7 @@ class TestingConfig(Config):
     """Testing configuration."""
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    ENABLE_SWAGGER = True
 
 config = {
     'development': DevelopmentConfig,
